@@ -1,7 +1,7 @@
 # EchoRoom Implementation Progress
 
-> **Last Updated**: Session 2 - Phase 7 Complete
-> **Current Phase**: Phase 8 - PWA Assets & Polish (Next)
+> **Last Updated**: Session 3 - GitHub Pages Deployment Configured
+> **Current Phase**: Testing & Debugging
 
 ---
 
@@ -70,10 +70,20 @@
 - [x] `src/pages/DetectionPage.tsx` - Real detection with ML predictions
 - [x] `src/pages/SettingsPage.tsx` - Settings with chirp mode selection
 
-### Phase 8: PWA Assets
-- [ ] `public/manifest.json` (configured in vite.config.ts)
-- [ ] `public/icons/` (192x192, 512x512) - Need to create
+### Phase 8: PWA Assets ✅ COMPLETE
+- [x] `public/manifest.json` (configured in vite.config.ts)
+- [x] `public/icons/icon-192.svg` - App icon (192x192)
+- [x] `public/icons/icon-512.svg` - App icon (512x512)
+- [x] `public/favicon.svg` - Browser favicon
 - [x] Service worker configuration (via vite-plugin-pwa)
+
+### Phase 9: GitHub Pages Deployment ✅ COMPLETE
+- [x] `.github/workflows/deploy.yml` - GitHub Actions workflow
+- [x] Vite base URL configured for `/echoRoomLocator/`
+- [x] BrowserRouter basename configured
+- [x] PWA manifest scope/start_url updated
+- [x] Repository: https://github.com/Chris-C42/echoRoomLocator
+- [x] Live URL: https://chris-c42.github.io/echoRoomLocator/
 
 ---
 
@@ -115,12 +125,34 @@
 4. ✅ Fixed TypeScript type mismatches
 5. ✅ Build verified and passing
 
+### Session 3 - Completed
+1. ✅ Created PWA icons:
+   - `public/icons/icon-192.svg` - 192x192 app icon
+   - `public/icons/icon-512.svg` - 512x512 app icon
+   - `public/favicon.svg` - Browser favicon
+2. ✅ Added debug logging to audio capture flow:
+   - `[TrainingPage]` logs for capture handler
+   - `[AudioEngine]` logs for capture/processing stages
+   - `[AudioCapture]` logs for low-level audio operations
+3. ✅ Configured GitHub Pages deployment:
+   - Created `.github/workflows/deploy.yml` for CI/CD
+   - Updated `vite.config.ts` with `base: '/echoRoomLocator/'`
+   - Updated `src/App.tsx` with `basename="/echoRoomLocator"`
+   - Updated PWA manifest scope and start_url
+4. ✅ Updated `.gitignore` (added dist/, env files, editor files)
+5. ✅ Removed dist/ from git tracking (built by CI)
+6. ✅ Changed git remote to new repository:
+   - Old: `https://github.com/Chris-C42/IndoorLocationClassifier.git`
+   - New: `https://github.com/Chris-C42/echoRoomLocator.git`
+7. ✅ Pushed all changes to GitHub
+
 ### Next Steps When Resuming
 If the conversation is interrupted, resume by:
 1. Reading this PROGRESS.md file
-2. Create PWA icons (192x192, 512x512)
-3. Test end-to-end on mobile device
-4. Consider adding visualizations (waveform, spectrogram)
+2. Enable GitHub Pages in repository settings (Settings → Pages → Source: GitHub Actions)
+3. Test microphone permissions on deployed site (HTTPS required)
+4. Debug any audio capture issues using console logs
+5. Consider adding visualizations (waveform, spectrogram)
 
 ---
 
@@ -177,48 +209,79 @@ ultrasonic: {
 
 ---
 
-## Files Created This Session
+## Project Structure
 
 ```
-src/
-├── main.tsx                          # App entry point
-├── App.tsx                           # Router with lazy loading
-├── index.css                         # Tailwind global styles
-├── vite-env.d.ts                     # Vite types
-├── audio/
-│   ├── types.ts                      # Audio types
-│   ├── utils.ts                      # DSP utilities (FFT, MFCC, etc.)
-│   ├── ChirpGenerator.ts             # Chirp generation
-│   ├── AudioCapture.ts               # Microphone capture
-│   ├── ImpulseResponseExtractor.ts   # Deconvolution
-│   ├── FeatureExtractor.ts           # Feature extraction
-│   └── index.ts                      # Public API
-├── storage/
-│   ├── types.ts                      # Storage types
-│   ├── database.ts                   # IndexedDB setup
-│   ├── RoomStore.ts                  # Room CRUD
-│   ├── SampleStore.ts                # Sample CRUD
-│   ├── ModelStore.ts                 # Model persistence
-│   └── index.ts                      # Public API
-├── ml/
-│   ├── types.ts                      # ML types
-│   ├── FeatureNormalizer.ts          # Z-score normalization
-│   ├── RoomClassifier.ts             # TensorFlow.js model
-│   ├── ModelTrainer.ts               # Training pipeline
-│   ├── ConfidenceEstimator.ts        # Confidence scoring
-│   └── index.ts                      # Public API
-└── pages/
-    ├── HomePage.tsx                  # Landing page
-    ├── TrainingPage.tsx              # Training UI
-    ├── DetectionPage.tsx             # Detection UI
-    └── SettingsPage.tsx              # Settings UI
+echoRoomLocator/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml                # GitHub Pages deployment
+├── public/
+│   ├── favicon.svg                   # Browser favicon
+│   └── icons/
+│       ├── icon-192.svg              # PWA icon (192x192)
+│       └── icon-512.svg              # PWA icon (512x512)
+├── src/
+│   ├── main.tsx                      # App entry point
+│   ├── App.tsx                       # Router with lazy loading
+│   ├── index.css                     # Tailwind global styles
+│   ├── vite-env.d.ts                 # Vite types
+│   ├── audio/
+│   │   ├── types.ts                  # Audio types
+│   │   ├── utils.ts                  # DSP utilities (FFT, MFCC, etc.)
+│   │   ├── ChirpGenerator.ts         # Chirp generation
+│   │   ├── AudioCapture.ts           # Microphone capture
+│   │   ├── ImpulseResponseExtractor.ts # Deconvolution
+│   │   ├── FeatureExtractor.ts       # Feature extraction
+│   │   └── index.ts                  # Public API
+│   ├── storage/
+│   │   ├── types.ts                  # Storage types
+│   │   ├── database.ts               # IndexedDB setup
+│   │   ├── RoomStore.ts              # Room CRUD
+│   │   ├── SampleStore.ts            # Sample CRUD
+│   │   ├── ModelStore.ts             # Model persistence
+│   │   └── index.ts                  # Public API
+│   ├── ml/
+│   │   ├── types.ts                  # ML types
+│   │   ├── FeatureNormalizer.ts      # Z-score normalization
+│   │   ├── RoomClassifier.ts         # TensorFlow.js model
+│   │   ├── ModelTrainer.ts           # Training pipeline
+│   │   ├── ConfidenceEstimator.ts    # Confidence scoring
+│   │   └── index.ts                  # Public API
+│   ├── hooks/
+│   │   ├── useAudioEngine.ts         # Audio capture hook
+│   │   ├── useRooms.ts               # Room management hook
+│   │   ├── useSamples.ts             # Sample management hook
+│   │   ├── useRoomClassifier.ts      # ML classifier hook
+│   │   └── index.ts                  # Public API
+│   └── pages/
+│       ├── HomePage.tsx              # Landing page
+│       ├── TrainingPage.tsx          # Training UI
+│       ├── DetectionPage.tsx         # Detection UI
+│       └── SettingsPage.tsx          # Settings UI
+├── .gitignore
+├── package.json
+├── vite.config.ts                    # Vite + PWA config
+├── tailwind.config.js
+├── tsconfig.json
+├── CLAUDE.md                         # Claude Code instructions
+└── PROGRESS.md                       # This file
 ```
 
 ---
 
-## Build Status
+## Build & Deployment Status
 
 - ✅ `npm install` - Dependencies installed (701 packages)
 - ✅ `npm run typecheck` - TypeScript passes
 - ✅ `npm run build` - Production build successful
 - ✅ `npm run dev` - Dev server tested and working
+- ✅ GitHub Actions - Auto-deploy on push to main
+- ✅ GitHub Pages - https://chris-c42.github.io/echoRoomLocator/
+
+## Repository
+
+- **GitHub**: https://github.com/Chris-C42/echoRoomLocator
+- **Live Demo**: https://chris-c42.github.io/echoRoomLocator/
+- **Branch**: main
+- **CI/CD**: GitHub Actions (`.github/workflows/deploy.yml`)
