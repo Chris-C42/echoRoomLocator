@@ -5,6 +5,7 @@ import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: '/echoRoomLocator/',
   plugins: [
     react(),
     VitePWA({
@@ -18,21 +19,21 @@ export default defineConfig({
         background_color: '#1a1a2e',
         display: 'standalone',
         orientation: 'portrait',
-        scope: '/',
-        start_url: '/',
+        scope: '/echoRoomLocator/',
+        start_url: '/echoRoomLocator/',
         icons: [
           {
-            src: '/icons/icon-192.svg',
+            src: 'icons/icon-192.svg',
             sizes: '192x192',
             type: 'image/svg+xml'
           },
           {
-            src: '/icons/icon-512.svg',
+            src: 'icons/icon-512.svg',
             sizes: '512x512',
             type: 'image/svg+xml'
           },
           {
-            src: '/icons/icon-512.svg',
+            src: 'icons/icon-512.svg',
             sizes: '512x512',
             type: 'image/svg+xml',
             purpose: 'any maskable'
