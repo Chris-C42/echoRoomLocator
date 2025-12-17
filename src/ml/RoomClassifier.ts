@@ -308,8 +308,20 @@ export class RoomClassifier {
     roomLabels: string[],
     normalizerParams: { mean: number[]; std: number[]; featureCount: number }
   ): Promise<void> {
+    // Parse topology if it's a string (can happen depending on how it was serialized)
+    let parsedTopology = topology;
+    if (typeof topology === 'string') {
+      parsedTopology = JSON.parse(topology);
+    }
+
+    // Ensure topology is in the correct format for modelFromJSON
+    // modelFromJSON expects { modelTopology: ... } format
+    const modelJSON = (parsedTopology as Record<string, unknown>).modelTopology
+      ? parsedTopology
+      : { modelTopology: parsedTopology };
+
     // Load model from JSON
-    this.model = await tf.models.modelFromJSON(topology as tf.io.ModelJSON);
+    this.model = await tf.models.modelFromJSON(modelJSON as tf.io.ModelJSON);
 
     // Set weights
     const weightData = new Float32Array(weights);
