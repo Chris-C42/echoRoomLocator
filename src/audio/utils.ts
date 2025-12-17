@@ -267,7 +267,16 @@ export function rms(signal: Float32Array): number {
  * Normalize a signal to have maximum absolute value of 1
  */
 export function normalize(signal: Float32Array): Float32Array {
-  const max = Math.max(...signal.map(Math.abs));
+  // Find max using loop to avoid stack overflow on large arrays
+  // (spread operator would exceed call stack on mobile with 100k+ samples)
+  let max = 0;
+  for (let i = 0; i < signal.length; i++) {
+    const absVal = Math.abs(signal[i]);
+    if (absVal > max) {
+      max = absVal;
+    }
+  }
+
   if (max === 0) return signal;
 
   const normalized = new Float32Array(signal.length);

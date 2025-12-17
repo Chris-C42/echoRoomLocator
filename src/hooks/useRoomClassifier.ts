@@ -63,34 +63,37 @@ export function useRoomClassifier(): UseRoomClassifierReturn {
 
   const classifierRef = useRef<RoomClassifier | null>(null);
   const trainerRef = useRef<ModelTrainer | null>(null);
-
-  // Initialize trainer
-  useEffect(() => {
-    trainerRef.current = new ModelTrainer();
-
-    // Check for existing model on mount
-    loadModelFromStorage();
-
-    return () => {
-      if (classifierRef.current) {
-        classifierRef.current.dispose();
-      }
-    };
-  }, []);
+  const isLoadingRef = useRef<boolean>(false);
 
   /**
    * Load model from IndexedDB storage
+   * Defined before useEffect to ensure proper closure capture
    */
-  const loadModelFromStorage = async (): Promise<boolean> => {
+  const loadModelFromStorage = useCallback(async (): Promise<boolean> => {
+    // Prevent concurrent loads
+    if (isLoadingRef.current) {
+      console.log('[useRoomClassifier] Load already in progress, skipping');
+      return false;
+    }
+
+    isLoadingRef.current = true;
+    console.log('[useRoomClassifier] Loading model from storage...');
     setState((prev) => ({ ...prev, modelState: 'loading', error: null }));
 
     try {
       const storedModel = await getModel();
 
       if (!storedModel) {
+        console.log('[useRoomClassifier] No stored model found');
         setState((prev) => ({ ...prev, modelState: 'none' }));
+        isLoadingRef.current = false;
         return false;
       }
+
+      console.log('[useRoomClassifier] Found stored model, deserializing...', {
+        roomCount: storedModel.roomLabels.length,
+        weightsSize: storedModel.weights.byteLength,
+      });
 
       // Create new classifier and deserialize
       const classifier = new RoomClassifier();
@@ -103,6 +106,7 @@ export function useRoomClassifier(): UseRoomClassifierReturn {
 
       classifierRef.current = classifier;
 
+      console.log('[useRoomClassifier] Model loaded successfully');
       setState((prev) => ({
         ...prev,
         modelState: 'ready',
@@ -113,18 +117,34 @@ export function useRoomClassifier(): UseRoomClassifierReturn {
         },
       }));
 
+      isLoadingRef.current = false;
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load model';
-      console.error('Failed to load model:', error);
+      console.error('[useRoomClassifier] Failed to load model:', error);
       setState((prev) => ({
         ...prev,
         modelState: 'error',
         error: message,
       }));
+      isLoadingRef.current = false;
       return false;
     }
-  };
+  }, []);
+
+  // Initialize trainer and load model on mount
+  useEffect(() => {
+    trainerRef.current = new ModelTrainer();
+
+    // Check for existing model on mount
+    loadModelFromStorage();
+
+    return () => {
+      if (classifierRef.current) {
+        classifierRef.current.dispose();
+      }
+    };
+  }, [loadModelFromStorage]);
 
   /**
    * Train a new model
@@ -163,10 +183,16 @@ export function useRoomClassifier(): UseRoomClassifierReturn {
 
       if (result.success) {
         // Save model to storage
+        console.log('[useRoomClassifier] Training successful, serializing model...');
         const { topology, weights } = await classifier.serialize();
         const normalizer = classifier.getNormalizer();
 
         if (normalizer) {
+          console.log('[useRoomClassifier] Saving model to storage...', {
+            topologyKeys: Object.keys(topology as object),
+            weightsSize: weights.byteLength,
+            roomCount: roomIds.length,
+          });
           await saveModel(
             topology as object,
             weights,
@@ -180,6 +206,9 @@ export function useRoomClassifier(): UseRoomClassifierReturn {
               roomCount: roomIds.length,
             }
           );
+          console.log('[useRoomClassifier] Model saved successfully');
+        } else {
+          console.error('[useRoomClassifier] Warning: normalizer is null, model not saved!');
         }
 
         classifierRef.current = classifier;
@@ -256,7 +285,7 @@ export function useRoomClassifier(): UseRoomClassifierReturn {
    */
   const loadModel = useCallback(async (): Promise<boolean> => {
     return loadModelFromStorage();
-  }, []);
+  }, [loadModelFromStorage]);
 
   /**
    * Clear the trained model
