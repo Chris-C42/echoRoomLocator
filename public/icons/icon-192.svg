@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4a90d9"/>
+      <stop offset="100%" style="stop-color:#10b981"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="32" fill="url(#bg)"/>
+  <!-- Sound waves -->
+  <g fill="none" stroke="url(#accent)" stroke-width="4" stroke-linecap="round">
+    <!-- Center microphone icon -->
+    <circle cx="96" cy="80" r="16" fill="url(#accent)"/>
+    <rect x="88" y="96" width="16" height="24" rx="2" fill="url(#accent)"/>
+    <path d="M72 108 C72 132, 120 132, 120 108" stroke-width="4"/>
+    <line x1="96" y1="132" x2="96" y2="148"/>
+    <line x1="80" y1="148" x2="112" y2="148"/>
+    <!-- Sound waves emanating -->
+    <path d="M52 60 Q 40 96, 52 132" opacity="0.4"/>
+    <path d="M36 48 Q 20 96, 36 144" opacity="0.2"/>
+    <path d="M140 60 Q 152 96, 140 132" opacity="0.4"/>
+    <path d="M156 48 Q 172 96, 156 144" opacity="0.2"/>
+  </g>
+</svg>

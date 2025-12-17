@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: #4a90d9;
+    --color-dark: #1a1a2e;
+    --color-accent: #00d4aa;
+  }
+
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-dark-900 text-gray-100 min-h-screen;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Prevent pull-to-refresh on mobile */
+  body {
+    overscroll-behavior-y: contain;
+  }
+}
+
+@layer components {
+  /* Touch-friendly button base */
+  .btn {
+    @apply min-h-[44px] min-w-[44px] px-4 py-2 rounded-lg font-medium
+           transition-all duration-200 ease-out
+           focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-dark-900
+           active:scale-95;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary-600 text-white hover:bg-primary-500;
+  }
+
+  .btn-secondary {
+    @apply btn bg-dark-700 text-gray-200 hover:bg-dark-600 border border-dark-500;
+  }
+
+  .btn-accent {
+    @apply btn bg-accent-600 text-white hover:bg-accent-500;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-gray-300 hover:bg-dark-700;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-500;
+  }
+
+  /* Card component */
+  .card {
+    @apply bg-dark-800 rounded-xl border border-dark-700 p-4;
+  }
+
+  /* Input fields */
+  .input {
+    @apply w-full min-h-[44px] px-4 py-2 rounded-lg
+           bg-dark-700 border border-dark-600
+           text-gray-100 placeholder-gray-500
+           focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+           transition-colors duration-200;
+  }
+
+  /* Page container */
+  .page {
+    @apply min-h-screen pb-20 px-4 pt-4;
+  }
+
+  /* Section heading */
+  .section-title {
+    @apply text-lg font-semibold text-gray-100 mb-3;
+  }
+}
+
+@layer utilities {
+  /* Safe area insets for notched devices */
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary-400 to-accent-400 bg-clip-text text-transparent;
+  }
+
+  /* Glow effects */
+  .glow-primary {
+    box-shadow: 0 0 20px rgba(74, 144, 217, 0.3);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px rgba(0, 212, 170, 0.3);
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Canvas rendering optimization */
+canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
