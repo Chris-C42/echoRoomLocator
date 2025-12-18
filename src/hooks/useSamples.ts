@@ -10,6 +10,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
   Sample,
+  SampleFeatures,
   SampleMetadata,
   createSample,
   getSamplesForRoom,
@@ -38,7 +39,7 @@ export interface TrainingReadiness {
 
 export interface UseSamplesReturn {
   state: UseSamplesState;
-  addSample: (roomId: string, features: number[], metadata: SampleMetadata) => Promise<Sample | null>;
+  addSample: (roomId: string, features: SampleFeatures, metadata: SampleMetadata) => Promise<Sample | null>;
   removeSample: (id: string) => Promise<boolean>;
   removeSamplesForRoom: (roomId: string) => Promise<number>;
   getSamplesForRoom: (roomId: string) => Promise<Sample[]>;
@@ -95,7 +96,7 @@ export function useSamples(): UseSamplesReturn {
    */
   const addSample = useCallback(async (
     roomId: string,
-    features: number[],
+    features: SampleFeatures,
     metadata: SampleMetadata
   ): Promise<Sample | null> => {
     try {

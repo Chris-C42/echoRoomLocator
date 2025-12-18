@@ -108,3 +108,71 @@ export type RoomClassifierModel = tf.LayersModel;
 // Callback types
 export type TrainingProgressCallback = (progress: TrainingProgress) => void;
 export type TrainingCompleteCallback = (result: TrainingResult) => void;
+
+// ============================================
+// Multi-Modal Model Configuration
+// ============================================
+
+export type EncoderType = 'chirp' | 'ambient';
+
+export interface MultiModalModelConfig {
+  // Feature sizes (including orientation)
+  chirpInputSize: number;      // Chirp features (60) + orientation (3) = 63
+  ambientInputSize: number;    // Ambient features (73) + orientation (3) = 76
+
+  // Encoder architectures
+  chirpEncoderLayers: number[];   // e.g., [128, 64]
+  ambientEncoderLayers: number[]; // e.g., [128, 64]
+
+  // Shared embedding dimension
+  embeddingSize: number;          // e.g., 32
+
+  // Classifier layers after embedding
+  classifierLayers: number[];     // e.g., [64, 32]
+  dropoutRates: number[];         // Dropout for each layer
+
+  numClasses: number;
+  learningRate: number;
+}
+
+export const DEFAULT_MULTIMODAL_CONFIG: Omit<MultiModalModelConfig, 'numClasses'> = {
+  chirpInputSize: 63,    // 60 chirp + 3 orientation
+  ambientInputSize: 76,  // 73 ambient + 3 orientation
+  chirpEncoderLayers: [128, 64],
+  ambientEncoderLayers: [128, 64],
+  embeddingSize: 32,
+  classifierLayers: [64, 32],
+  dropoutRates: [0.3, 0.2, 0],
+  learningRate: 0.001,
+};
+
+export interface MultiModalTrainingConfig extends TrainingConfig {
+  // Additional multi-modal settings
+  balanceModalities: boolean;  // Balance chirp and ambient samples
+  modalityWeights: {
+    chirp: number;             // Weight for chirp samples
+    ambient: number;           // Weight for ambient samples
+  };
+}
+
+export const DEFAULT_MULTIMODAL_TRAINING_CONFIG: MultiModalTrainingConfig = {
+  ...DEFAULT_TRAINING_CONFIG,
+  balanceModalities: true,
+  modalityWeights: {
+    chirp: 1.0,
+    ambient: 1.0,
+  },
+};
+
+export interface MultiModalPredictionResult extends PredictionResult {
+  encoderUsed: EncoderType;    // Which encoder was used
+  embeddingVector?: number[];  // Optional: the 32-dim embedding
+}
+
+export interface MultiModalTrainingData {
+  chirpFeatures: number[][];   // Chirp feature vectors
+  chirpLabels: string[];       // Room labels for chirp samples
+  ambientFeatures: number[][]; // Ambient feature vectors
+  ambientLabels: string[];     // Room labels for ambient samples
+  roomLabels: string[];        // Unique room IDs
+}

@@ -9,6 +9,7 @@ import { ChirpMode } from '../audio';
 import { PredictionResult } from '../ml';
 
 type DetectionState = 'idle' | 'listening' | 'processing' | 'result' | 'error';
+type DetectionModeUI = 'chirp-audible' | 'chirp-ultrasonic' | 'ambient';
 
 interface Alternative {
   roomId: string;
@@ -16,12 +17,12 @@ interface Alternative {
 }
 
 export default function DetectionPage() {
-  const { state: audioState, capture, requestPermission, reset: resetAudio } = useAudioEngine();
+  const { state: audioState, capture, captureAmbient, requestPermission, reset: resetAudio } = useAudioEngine();
   const { state: classifierState, predict } = useRoomClassifier();
   const { state: roomsState, getRoomById } = useRooms();
 
   const [detectionState, setDetectionState] = useState<DetectionState>('idle');
-  const [chirpMode, setChirpMode] = useState<ChirpMode>('audible');
+  const [detectionMode, setDetectionMode] = useState<DetectionModeUI>('chirp-audible');
   const [prediction, setPrediction] = useState<PredictionResult | null>(null);
   const [detectedRoomName, setDetectedRoomName] = useState<string | null>(null);
   const [alternatives, setAlternatives] = useState<Alternative[]>([]);
@@ -61,10 +62,25 @@ export default function DetectionPage() {
     setAlternatives([]);
     resetAudio();
 
-    // Capture audio
-    const features = await capture(chirpMode);
+    // Capture audio based on detection mode
+    let featureVector: number[] | null = null;
 
-    if (!features) {
+    if (detectionMode === 'ambient') {
+      // Ambient capture (passive, no chirp)
+      const features = await captureAmbient(3, true);
+      if (features) {
+        featureVector = features.raw;
+      }
+    } else {
+      // Chirp capture (active)
+      const chirpMode: ChirpMode = detectionMode === 'chirp-ultrasonic' ? 'ultrasonic' : 'audible';
+      const features = await capture(chirpMode, true);
+      if (features) {
+        featureVector = features.raw;
+      }
+    }
+
+    if (!featureVector) {
       setError(audioState.error || 'Failed to capture audio');
       setDetectionState('error');
       return;
@@ -72,7 +88,7 @@ export default function DetectionPage() {
 
     // Run prediction
     setDetectionState('processing');
-    const result = await predict(features.raw);
+    const result = await predict(featureVector);
 
     if (!result) {
       setError(classifierState.error || 'Prediction failed');
@@ -140,14 +156,26 @@ export default function DetectionPage() {
 
           {detectionState === 'listening' && (
             <>
-              <div className="w-32 h-32 mx-auto mb-6 rounded-full bg-primary-600/20 flex items-center justify-center animate-pulse-slow glow-primary">
-                <div className="w-24 h-24 rounded-full bg-primary-600/40 flex items-center justify-center">
-                  <svg className="w-12 h-12 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
+              <div className={`w-32 h-32 mx-auto mb-6 rounded-full flex items-center justify-center animate-pulse-slow ${
+                detectionMode === 'ambient' ? 'bg-accent-600/20 glow-accent' : 'bg-primary-600/20 glow-primary'
+              }`}>
+                <div className={`w-24 h-24 rounded-full flex items-center justify-center ${
+                  detectionMode === 'ambient' ? 'bg-accent-600/40' : 'bg-primary-600/40'
+                }`}>
+                  {detectionMode === 'ambient' ? (
+                    <svg className="w-12 h-12 text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                    </svg>
+                  ) : (
+                    <svg className="w-12 h-12 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                  )}
                 </div>
               </div>
-              <p className="text-primary-400 mb-6">Emitting chirp & listening...</p>
+              <p className={detectionMode === 'ambient' ? 'text-accent-400 mb-6' : 'text-primary-400 mb-6'}>
+                {detectionMode === 'ambient' ? 'Recording ambient audio...' : 'Emitting chirp & listening...'}
+              </p>
             </>
           )}
 
@@ -228,30 +256,46 @@ export default function DetectionPage() {
         {/* Mode Selector */}
         <div className="card mt-6">
           <h2 className="section-title">Detection Mode</h2>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-2">
             <button
-              onClick={() => setChirpMode('audible')}
+              onClick={() => setDetectionMode('chirp-audible')}
               className={`btn-secondary text-sm py-3 ${
-                chirpMode === 'audible' ? 'border-primary-500 bg-primary-600/10' : ''
+                detectionMode === 'chirp-audible' ? 'border-primary-500 bg-primary-600/10' : ''
               }`}
             >
-              <div className={`font-medium ${chirpMode === 'audible' ? 'text-primary-400' : ''}`}>
-                Audible
+              <div className={`font-medium ${detectionMode === 'chirp-audible' ? 'text-primary-400' : ''}`}>
+                Chirp
               </div>
-              <div className="text-xs text-gray-500">High accuracy</div>
+              <div className="text-xs text-gray-500">Best accuracy</div>
             </button>
             <button
-              onClick={() => setChirpMode('ultrasonic')}
+              onClick={() => setDetectionMode('chirp-ultrasonic')}
               className={`btn-secondary text-sm py-3 ${
-                chirpMode === 'ultrasonic' ? 'border-primary-500 bg-primary-600/10' : ''
+                detectionMode === 'chirp-ultrasonic' ? 'border-primary-500 bg-primary-600/10' : ''
               }`}
             >
-              <div className={`font-medium ${chirpMode === 'ultrasonic' ? 'text-primary-400' : ''}`}>
+              <div className={`font-medium ${detectionMode === 'chirp-ultrasonic' ? 'text-primary-400' : ''}`}>
                 Ultrasonic
               </div>
               <div className="text-xs text-gray-500">Less audible</div>
             </button>
+            <button
+              onClick={() => setDetectionMode('ambient')}
+              className={`btn-secondary text-sm py-3 ${
+                detectionMode === 'ambient' ? 'border-accent-500 bg-accent-600/10' : ''
+              }`}
+            >
+              <div className={`font-medium ${detectionMode === 'ambient' ? 'text-accent-400' : ''}`}>
+                Ambient
+              </div>
+              <div className="text-xs text-gray-500">No sound</div>
+            </button>
           </div>
+          <p className="text-xs text-gray-500 mt-2 text-center">
+            {detectionMode === 'chirp-audible' && 'Emits audible chirp (200Hz-18kHz)'}
+            {detectionMode === 'chirp-ultrasonic' && 'Emits high-freq chirp (15-20kHz)'}
+            {detectionMode === 'ambient' && 'Passive recording - no sound emitted'}
+          </p>
         </div>
 
         {/* Model Info / No Model Warning */}

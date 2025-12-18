@@ -92,10 +92,19 @@ export function useRoomClassifier(): UseRoomClassifierReturn {
 
       console.log('[useRoomClassifier] Found stored model, deserializing...', {
         roomCount: storedModel.roomLabels.length,
-        weightsSize: storedModel.weights.byteLength,
+        weightsSize: storedModel.weights?.byteLength ?? 0,
+        modelType: storedModel.modelType,
       });
 
       // Create new classifier and deserialize
+      // For now, only support single-mode models
+      if (storedModel.modelType !== 'single' || !storedModel.topology || !storedModel.weights || !storedModel.normalizer) {
+        console.warn('[useRoomClassifier] Multi-modal models not yet supported in this hook');
+        setState((prev) => ({ ...prev, modelState: 'none' }));
+        isLoadingRef.current = false;
+        return false;
+      }
+
       const classifier = new RoomClassifier();
       await classifier.deserialize(
         storedModel.topology,

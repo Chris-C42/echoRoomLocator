@@ -10,17 +10,19 @@ import {
 import { ChirpMode } from '../audio';
 
 type ViewState = 'list' | 'add-room' | 'capture' | 'training';
+type CaptureModeUI = 'chirp-audible' | 'chirp-ultrasonic' | 'ambient';
 
 export default function TrainingPage() {
   const { state: roomsState, addRoom, removeRoom, refreshRooms } = useRooms();
-  const { state: audioState, capture, requestPermission, reset: resetAudio } = useAudioEngine();
+  const { state: audioState, capture, captureAmbient, requestPermission, reset: resetAudio } = useAudioEngine();
   const { state: samplesState, addSample, getTrainingData, refreshSamples } = useSamples();
   const { state: classifierState, train } = useRoomClassifier();
 
   const [viewState, setViewState] = useState<ViewState>('list');
   const [newRoomName, setNewRoomName] = useState('');
   const [selectedRoom, setSelectedRoom] = useState<RoomWithSampleCount | null>(null);
-  const [chirpMode, setChirpMode] = useState<ChirpMode>('audible');
+  const [captureMode, setCaptureMode] = useState<CaptureModeUI>('chirp-audible');
+  const [includeOrientation, setIncludeOrientation] = useState(true);
   const [captureCount, setCaptureCount] = useState(0);
 
   // Refresh rooms when samples change
@@ -64,32 +66,88 @@ export default function TrainingPage() {
 
   // Handle a single capture
   const handleCapture = async () => {
-    console.log('[TrainingPage] handleCapture called, selectedRoom:', selectedRoom?.name);
+    console.log('[TrainingPage] handleCapture called, selectedRoom:', selectedRoom?.name, 'mode:', captureMode);
     if (!selectedRoom) {
       console.error('[TrainingPage] No room selected!');
       return;
     }
 
     resetAudio();
-    console.log('[TrainingPage] Calling capture with mode:', chirpMode);
-    const features = await capture(chirpMode);
-    console.log('[TrainingPage] Capture result:', features ? 'success' : 'failed');
 
-    if (features) {
-      // Save the sample
-      console.log('[TrainingPage] Saving sample...');
-      await addSample(selectedRoom.id, features.raw, {
-        chirpMode,
-        duration: chirpMode === 'audible' ? 500 : 300, // ms
-        sampleRate: 48000,
-        deviceInfo: navigator.userAgent,
-      });
+    if (captureMode === 'ambient') {
+      // Ambient capture (passive, no chirp)
+      console.log('[TrainingPage] Calling captureAmbient...');
+      const features = await captureAmbient(3, includeOrientation);
+      console.log('[TrainingPage] Ambient capture result:', features ? 'success' : 'failed');
 
-      setCaptureCount((c) => c + 1);
-      await refreshRooms();
-      console.log('[TrainingPage] Sample saved successfully');
+      if (features) {
+        // Get orientation if available
+        const orientation = audioState.lastOrientation
+          ? [
+              (audioState.lastOrientation.alpha ?? 0) / 360,
+              ((audioState.lastOrientation.beta ?? 0) + 180) / 360,
+              ((audioState.lastOrientation.gamma ?? 0) + 90) / 180,
+            ] as [number, number, number]
+          : undefined;
+
+        console.log('[TrainingPage] Saving ambient sample...');
+        await addSample(selectedRoom.id, {
+          mode: 'ambient-manual',
+          ambientFeatures: features.raw,
+          orientation,
+          raw: features.raw,
+        }, {
+          captureMode: 'ambient-manual',
+          duration: 3000, // 3 seconds
+          sampleRate: 48000,
+          deviceInfo: navigator.userAgent,
+          hasOrientation: !!orientation,
+        });
+
+        setCaptureCount((c) => c + 1);
+        await refreshRooms();
+        console.log('[TrainingPage] Ambient sample saved successfully');
+      } else {
+        console.error('[TrainingPage] Ambient capture returned null');
+      }
     } else {
-      console.error('[TrainingPage] Capture returned null, check audioState.error');
+      // Chirp capture (active)
+      const selectedChirpMode: ChirpMode = captureMode === 'chirp-ultrasonic' ? 'ultrasonic' : 'audible';
+      console.log('[TrainingPage] Calling capture with chirp mode:', selectedChirpMode);
+      const features = await capture(selectedChirpMode, includeOrientation);
+      console.log('[TrainingPage] Capture result:', features ? 'success' : 'failed');
+
+      if (features) {
+        // Get orientation if available
+        const orientation = audioState.lastOrientation
+          ? [
+              (audioState.lastOrientation.alpha ?? 0) / 360,
+              ((audioState.lastOrientation.beta ?? 0) + 180) / 360,
+              ((audioState.lastOrientation.gamma ?? 0) + 90) / 180,
+            ] as [number, number, number]
+          : undefined;
+
+        console.log('[TrainingPage] Saving chirp sample...');
+        await addSample(selectedRoom.id, {
+          mode: 'chirp',
+          chirpFeatures: features.raw,
+          orientation,
+          raw: features.raw,
+        }, {
+          captureMode: 'chirp',
+          chirpMode: selectedChirpMode,
+          duration: selectedChirpMode === 'audible' ? 500 : 300,
+          sampleRate: 48000,
+          deviceInfo: navigator.userAgent,
+          hasOrientation: !!orientation,
+        });
+
+        setCaptureCount((c) => c + 1);
+        await refreshRooms();
+        console.log('[TrainingPage] Chirp sample saved successfully');
+      } else {
+        console.error('[TrainingPage] Capture returned null, check audioState.error');
+      }
     }
   };
 
@@ -180,37 +238,71 @@ export default function TrainingPage() {
             )}
           </div>
 
-          {/* Chirp Mode Selection */}
+          {/* Capture Mode Selection */}
           <div className="card mb-6">
-            <h2 className="section-title">Chirp Mode</h2>
-            <div className="grid grid-cols-2 gap-2">
+            <h2 className="section-title">Capture Mode</h2>
+            <div className="grid grid-cols-3 gap-2">
               <button
-                onClick={() => setChirpMode('audible')}
-                className={`py-2 px-4 rounded-lg transition-colors ${
-                  chirpMode === 'audible'
+                onClick={() => setCaptureMode('chirp-audible')}
+                className={`py-2 px-3 rounded-lg transition-colors text-sm ${
+                  captureMode === 'chirp-audible'
                     ? 'bg-primary-600 text-white'
                     : 'bg-dark-700 text-gray-400'
                 }`}
               >
-                Audible
+                Chirp
               </button>
               <button
-                onClick={() => setChirpMode('ultrasonic')}
-                className={`py-2 px-4 rounded-lg transition-colors ${
-                  chirpMode === 'ultrasonic'
+                onClick={() => setCaptureMode('chirp-ultrasonic')}
+                className={`py-2 px-3 rounded-lg transition-colors text-sm ${
+                  captureMode === 'chirp-ultrasonic'
                     ? 'bg-primary-600 text-white'
                     : 'bg-dark-700 text-gray-400'
                 }`}
               >
                 Ultrasonic
               </button>
+              <button
+                onClick={() => setCaptureMode('ambient')}
+                className={`py-2 px-3 rounded-lg transition-colors text-sm ${
+                  captureMode === 'ambient'
+                    ? 'bg-accent-600 text-white'
+                    : 'bg-dark-700 text-gray-400'
+                }`}
+              >
+                Ambient
+              </button>
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              {chirpMode === 'audible'
-                ? 'Higher accuracy, audible sound (200Hz-18kHz)'
-                : 'Less audible, reduced accuracy (15kHz-20kHz)'}
+              {captureMode === 'chirp-audible' && 'Active chirp (200Hz-18kHz) - Best accuracy'}
+              {captureMode === 'chirp-ultrasonic' && 'High-freq chirp (15-20kHz) - Less audible'}
+              {captureMode === 'ambient' && 'Passive recording (3s) - No sound emitted'}
             </p>
           </div>
+
+          {/* Orientation Toggle */}
+          {audioState.hasOrientationSupport && (
+            <div className="card mb-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-medium text-white">Include Orientation</h2>
+                  <p className="text-xs text-gray-500">Use device tilt as feature input</p>
+                </div>
+                <button
+                  onClick={() => setIncludeOrientation(!includeOrientation)}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${
+                    includeOrientation ? 'bg-primary-600' : 'bg-dark-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                      includeOrientation ? 'translate-x-7' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Capture Button */}
           <button
@@ -219,18 +311,31 @@ export default function TrainingPage() {
             className={`w-full py-6 rounded-xl text-xl font-bold transition-all ${
               audioState.captureState === 'capturing' || audioState.captureState === 'processing'
                 ? 'bg-accent-600 text-white animate-pulse'
-                : 'bg-primary-600 hover:bg-primary-500 text-white glow-primary'
+                : captureMode === 'ambient'
+                  ? 'bg-accent-600 hover:bg-accent-500 text-white glow-accent'
+                  : 'bg-primary-600 hover:bg-primary-500 text-white glow-primary'
             }`}
           >
             {audioState.captureState === 'idle' && (
               <span className="flex items-center justify-center gap-3">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                </svg>
-                Tap to Capture
+                {captureMode === 'ambient' ? (
+                  <>
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                    </svg>
+                    Record Ambient (3s)
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                    Tap to Capture
+                  </>
+                )}
               </span>
             )}
-            {audioState.captureState === 'capturing' && 'Listening...'}
+            {audioState.captureState === 'capturing' && (captureMode === 'ambient' ? 'Recording...' : 'Listening...')}
             {audioState.captureState === 'processing' && 'Processing...'}
             {audioState.captureState === 'complete' && (
               <span className="flex items-center justify-center gap-2">
@@ -250,18 +355,45 @@ export default function TrainingPage() {
           <div className="card mt-6">
             <h2 className="section-title">Capture Tips</h2>
             <ul className="text-sm text-gray-400 space-y-2">
-              <li className="flex gap-2">
-                <span className="text-accent-400">•</span>
-                Hold phone steady at chest height
-              </li>
-              <li className="flex gap-2">
-                <span className="text-accent-400">•</span>
-                Try different positions in the room
-              </li>
-              <li className="flex gap-2">
-                <span className="text-accent-400">•</span>
-                Minimize background noise
-              </li>
+              {captureMode === 'ambient' ? (
+                <>
+                  <li className="flex gap-2">
+                    <span className="text-accent-400">•</span>
+                    Captures room's ambient sound profile
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-accent-400">•</span>
+                    Works well with HVAC, appliance hum
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-accent-400">•</span>
+                    Keep phone still for 3 seconds
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li className="flex gap-2">
+                    <span className="text-accent-400">•</span>
+                    Hold phone steady at chest height
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-accent-400">•</span>
+                    Try different positions in the room
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-accent-400">•</span>
+                    {captureMode === 'chirp-ultrasonic'
+                      ? 'Speaker must support 15-20kHz'
+                      : 'Minimize background noise'}
+                  </li>
+                </>
+              )}
+              {includeOrientation && audioState.hasOrientationSupport && (
+                <li className="flex gap-2">
+                  <span className="text-primary-400">•</span>
+                  Orientation will be recorded as feature
+                </li>
+              )}
             </ul>
           </div>
 

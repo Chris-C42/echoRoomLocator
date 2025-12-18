@@ -416,3 +416,159 @@ export function variance(arr: Float32Array | number[]): number {
 export function std(arr: Float32Array | number[]): number {
   return Math.sqrt(variance(arr));
 }
+
+/**
+ * Calculate a percentile value from a sorted or unsorted array
+ * @param arr - Input array
+ * @param p - Percentile (0-100)
+ */
+export function percentile(arr: Float32Array | number[], p: number): number {
+  if (arr.length === 0) return 0;
+  if (p <= 0) return Math.min(...arr);
+  if (p >= 100) return Math.max(...arr);
+
+  // Sort a copy
+  const sorted = [...arr].sort((a, b) => a - b);
+  const index = (p / 100) * (sorted.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+
+  if (lower === upper) {
+    return sorted[lower];
+  }
+
+  // Linear interpolation
+  const fraction = index - lower;
+  return sorted[lower] * (1 - fraction) + sorted[upper] * fraction;
+}
+
+/**
+ * Detect peaks in a spectrum at specific frequencies
+ * Used for HVAC/hum detection (50Hz, 60Hz harmonics)
+ *
+ * @param spectrum - Power spectrum from FFT
+ * @param sampleRate - Audio sample rate
+ * @param frequencies - Target frequencies to check
+ * @param bandwidth - Hz bandwidth around each frequency to search
+ */
+export function detectPeaksAtFrequencies(
+  spectrum: Float32Array,
+  sampleRate: number,
+  frequencies: number[],
+  bandwidth: number = 5
+): number[] {
+  const fftSize = (spectrum.length - 1) * 2;
+  const binWidth = sampleRate / fftSize;
+
+  return frequencies.map((freq) => {
+    const centerBin = Math.round(freq / binWidth);
+    const halfBins = Math.ceil(bandwidth / binWidth);
+
+    let maxPower = 0;
+    for (let i = centerBin - halfBins; i <= centerBin + halfBins; i++) {
+      if (i >= 0 && i < spectrum.length) {
+        maxPower = Math.max(maxPower, spectrum[i]);
+      }
+    }
+
+    // Convert to dB, normalized
+    return linearToDb(Math.sqrt(maxPower));
+  });
+}
+
+/**
+ * Compute normalized autocorrelation of a signal
+ * Returns the first N peaks after lag 0
+ *
+ * @param signal - Input signal
+ * @param maxLag - Maximum lag to compute
+ * @param numPeaks - Number of peaks to return
+ */
+export function autocorrelation(
+  signal: Float32Array,
+  maxLag: number = 1000,
+  numPeaks: number = 5
+): number[] {
+  const N = signal.length;
+  maxLag = Math.min(maxLag, N - 1);
+
+  // Compute autocorrelation
+  const ac = new Float32Array(maxLag);
+  const signalMean = mean(signal);
+
+  // Normalize signal
+  const normalized = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    normalized[i] = signal[i] - signalMean;
+  }
+
+  // Variance for normalization
+  let variance = 0;
+  for (let i = 0; i < N; i++) {
+    variance += normalized[i] * normalized[i];
+  }
+
+  if (variance === 0) {
+    return new Array(numPeaks).fill(0);
+  }
+
+  // Compute autocorrelation for each lag
+  for (let lag = 0; lag < maxLag; lag++) {
+    let sum = 0;
+    for (let i = 0; i < N - lag; i++) {
+      sum += normalized[i] * normalized[i + lag];
+    }
+    ac[lag] = sum / variance;
+  }
+
+  // Find peaks (local maxima after lag 0)
+  const peaks: Array<{ lag: number; value: number }> = [];
+  const minLag = Math.floor(N * 0.01); // Skip very short lags (noise)
+
+  for (let i = minLag + 1; i < maxLag - 1; i++) {
+    if (ac[i] > ac[i - 1] && ac[i] > ac[i + 1] && ac[i] > 0.1) {
+      peaks.push({ lag: i, value: ac[i] });
+    }
+  }
+
+  // Sort by value and take top N
+  peaks.sort((a, b) => b.value - a.value);
+  const result = peaks.slice(0, numPeaks).map((p) => p.value);
+
+  // Pad with zeros if not enough peaks
+  while (result.length < numPeaks) {
+    result.push(0);
+  }
+
+  return result;
+}
+
+/**
+ * Compute octave band energies from a power spectrum
+ * Standard octave bands with center frequencies from 31.5 Hz to 16 kHz
+ */
+export function octaveBandEnergies(
+  spectrum: Float32Array,
+  sampleRate: number,
+  centerFrequencies: number[] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+): number[] {
+  const fftSize = (spectrum.length - 1) * 2;
+  const binWidth = sampleRate / fftSize;
+
+  return centerFrequencies.map((center) => {
+    // Octave band: center / sqrt(2) to center * sqrt(2)
+    const lowFreq = center / Math.SQRT2;
+    const highFreq = center * Math.SQRT2;
+
+    const lowBin = Math.max(0, Math.floor(lowFreq / binWidth));
+    const highBin = Math.min(spectrum.length - 1, Math.ceil(highFreq / binWidth));
+
+    // Sum energy in band
+    let energy = 0;
+    for (let i = lowBin; i <= highBin; i++) {
+      energy += spectrum[i];
+    }
+
+    return linearToDb(Math.sqrt(energy));
+  });
+}

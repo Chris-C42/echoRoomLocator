@@ -4,14 +4,14 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from './database';
-import { Sample, SampleMetadata, STORES } from './types';
+import { Sample, SampleFeatures, SampleMetadata, STORES } from './types';
 
 /**
  * Create a new sample for a room
  */
 export async function createSample(
   roomId: string,
-  features: number[],
+  features: SampleFeatures,
   metadata: SampleMetadata
 ): Promise<Sample> {
   const db = await getDatabase();
@@ -118,6 +118,8 @@ export async function getTotalSampleCount(): Promise<number> {
 /**
  * Get training data: features and labels for all samples
  * Returns samples grouped by room with their feature vectors
+ *
+ * For multi-modal support, extracts raw features from structured SampleFeatures
  */
 export async function getTrainingData(): Promise<{
   features: number[][];
@@ -132,9 +134,23 @@ export async function getTrainingData(): Promise<{
   const roomIdSet = new Set<string>();
 
   for (const sample of samples) {
-    features.push(sample.features);
-    labels.push(sample.roomId);
-    roomIdSet.add(sample.roomId);
+    // Extract raw features from structured SampleFeatures
+    // Prefer raw, then chirpFeatures, then ambientFeatures
+    let featureVector: number[] | undefined;
+
+    if (sample.features.raw) {
+      featureVector = sample.features.raw;
+    } else if (sample.features.chirpFeatures) {
+      featureVector = sample.features.chirpFeatures;
+    } else if (sample.features.ambientFeatures) {
+      featureVector = sample.features.ambientFeatures;
+    }
+
+    if (featureVector && featureVector.length > 0) {
+      features.push(featureVector);
+      labels.push(sample.roomId);
+      roomIdSet.add(sample.roomId);
+    }
   }
 
   return {

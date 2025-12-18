@@ -48,11 +48,14 @@ export {
 export type {
   Room,
   Sample,
+  SampleFeatures,
   SampleMetadata,
   StoredModel,
   FeatureNormalizer,
   ModelMetadata,
   TrainingProgress,
+  CaptureMode,
+  ModelType,
 } from './types';
 
 export { DB_NAME, DB_VERSION, STORES } from './types';

@@ -10,8 +10,14 @@ import {
   CaptureConfig,
   DEFAULT_CAPTURE_CONFIG,
   AudioCaptureResult,
+  AmbientCaptureResult,
 } from './types';
 import { getChirpConfig, playChirp } from './ChirpGenerator';
+import {
+  getCurrentOrientation,
+  hasOrientationSupport,
+  isSecureContext,
+} from './OrientationCapture';
 
 // Singleton audio context to avoid creating multiple instances
 let audioContext: AudioContext | null = null;
@@ -147,13 +153,19 @@ export async function recordAudio(
 /**
  * Capture audio by playing a chirp and recording the room response
  * This is the main function for acoustic measurement
+ *
+ * @param mode - Chirp mode (audible or ultrasonic)
+ * @param config - Capture configuration
+ * @param volume - Playback volume (0-1)
+ * @param includeOrientation - Whether to capture device orientation
  */
 export async function captureRoomResponse(
   mode: ChirpMode,
   config: CaptureConfig = DEFAULT_CAPTURE_CONFIG,
-  volume: number = 0.8
+  volume: number = 0.8,
+  includeOrientation: boolean = true
 ): Promise<AudioCaptureResult> {
-  console.log('[AudioCapture] Starting capture, mode:', mode);
+  console.log('[AudioCapture] Starting capture, mode:', mode, 'orientation:', includeOrientation);
 
   // Get audio context and ensure it's running
   console.log('[AudioCapture] Getting audio context...');
@@ -192,12 +204,20 @@ export async function captureRoomResponse(
     const captured = await recordingPromise;
     console.log('[AudioCapture] Recording complete, samples:', captured.length);
 
+    // Capture device orientation if requested
+    let orientation = undefined;
+    if (includeOrientation && hasOrientationSupport() && isSecureContext()) {
+      orientation = await getCurrentOrientation();
+      console.log('[AudioCapture] Orientation captured:', orientation);
+    }
+
     return {
       captured,
       chirp: chirpSignal,
       sampleRate: context.sampleRate,
       config: chirpConfig,
       timestamp: Date.now(),
+      orientation,
     };
   } finally {
     // Stop all tracks to release the microphone
@@ -209,19 +229,36 @@ export async function captureRoomResponse(
 /**
  * Capture audio in passive mode (no chirp, just background noise)
  * Useful for ambient acoustic fingerprinting
+ *
+ * @param durationSeconds - Recording duration in seconds
+ * @param includeOrientation - Whether to capture device orientation
  */
 export async function capturePassive(
-  durationSeconds: number = 3
-): Promise<{ audio: Float32Array; sampleRate: number; timestamp: number }> {
+  durationSeconds: number = 3,
+  includeOrientation: boolean = true
+): Promise<AmbientCaptureResult> {
+  console.log('[AudioCapture] Starting passive capture, duration:', durationSeconds, 'orientation:', includeOrientation);
+
   const context = await getAudioContext();
   const stream = await requestMicrophonePermission();
 
   try {
     const audio = await recordAudio(stream, durationSeconds, context.sampleRate);
+    console.log('[AudioCapture] Passive recording complete, samples:', audio.length);
+
+    // Capture device orientation if requested
+    let orientation = undefined;
+    if (includeOrientation && hasOrientationSupport() && isSecureContext()) {
+      orientation = await getCurrentOrientation();
+      console.log('[AudioCapture] Orientation captured:', orientation);
+    }
+
     return {
       audio,
       sampleRate: context.sampleRate,
+      duration: durationSeconds,
       timestamp: Date.now(),
+      orientation,
     };
   } finally {
     stream.getTracks().forEach((track) => track.stop());

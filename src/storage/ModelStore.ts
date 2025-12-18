@@ -8,7 +8,7 @@ import { StoredModel, FeatureNormalizer, ModelMetadata, STORES } from './types';
 const MODEL_ID = 'current' as const;
 
 /**
- * Save a trained model
+ * Save a trained model (single-mode, for backward compatibility)
  */
 export async function saveModel(
   topology: object,
@@ -21,6 +21,7 @@ export async function saveModel(
 
   const storedModel: StoredModel = {
     id: MODEL_ID,
+    modelType: 'single',
     topology,
     weights,
     roomLabels,
@@ -69,9 +70,10 @@ export async function deleteModel(): Promise<boolean> {
  */
 export async function getModelMetadata(): Promise<{
   roomLabels: string[];
-  normalizer: FeatureNormalizer;
+  normalizer?: FeatureNormalizer;
   metadata: ModelMetadata;
   createdAt: number;
+  modelType: 'single' | 'multimodal';
 } | undefined> {
   const model = await getModel();
   if (!model) {
@@ -83,6 +85,7 @@ export async function getModelMetadata(): Promise<{
     normalizer: model.normalizer,
     metadata: model.metadata,
     createdAt: model.createdAt,
+    modelType: model.modelType,
   };
 }
 
