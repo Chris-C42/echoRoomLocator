@@ -348,18 +348,25 @@ export default function TrainingPage() {
                   <h2 className="font-medium text-white">Include Orientation</h2>
                   <p className="text-xs text-gray-500">Use device tilt as feature input</p>
                 </div>
-                <button
-                  onClick={() => setIncludeOrientation(!includeOrientation)}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${
-                    includeOrientation ? 'bg-primary-600' : 'bg-dark-600'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      includeOrientation ? 'translate-x-7' : 'translate-x-1'
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-medium ${includeOrientation ? 'text-primary-400' : 'text-gray-500'}`}>
+                    {includeOrientation ? 'ON' : 'OFF'}
+                  </span>
+                  <button
+                    onClick={() => setIncludeOrientation(!includeOrientation)}
+                    className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                      includeOrientation ? 'bg-primary-600' : 'bg-dark-600'
                     }`}
-                  />
-                </button>
+                    role="switch"
+                    aria-checked={includeOrientation}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+                        includeOrientation ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </div>
           )}

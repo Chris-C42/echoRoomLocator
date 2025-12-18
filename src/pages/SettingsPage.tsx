@@ -1,9 +1,31 @@
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
+import { deleteDatabase } from '../storage';
 
 export default function SettingsPage() {
   const [chirpMode, setChirpMode] = useState<'audible' | 'ultrasonic'>('audible');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
+
+  const handleClearAllData = async () => {
+    if (!clearConfirm) {
+      setClearConfirm(true);
+      return;
+    }
+
+    setIsClearing(true);
+    try {
+      await deleteDatabase();
+      // Reload the page to reset all app state
+      window.location.reload();
+    } catch (error) {
+      console.error('Failed to clear data:', error);
+      alert('Failed to clear data. Please try again.');
+      setIsClearing(false);
+      setClearConfirm(false);
+    }
+  };
 
   return (
     <div className="page safe-top">
@@ -84,12 +106,17 @@ export default function SettingsPage() {
                 Import Training Data
               </span>
             </button>
-            <button className="btn-danger w-full justify-start">
+            <button
+              onClick={handleClearAllData}
+              onBlur={() => setClearConfirm(false)}
+              disabled={isClearing}
+              className={`w-full justify-start ${clearConfirm ? 'btn-danger animate-pulse' : 'btn-danger'}`}
+            >
               <span className="flex items-center gap-3">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
-                Clear All Data
+                {isClearing ? 'Clearing...' : clearConfirm ? 'Tap Again to Confirm' : 'Clear All Data'}
               </span>
             </button>
           </div>
