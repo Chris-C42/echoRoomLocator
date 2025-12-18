@@ -31,6 +31,12 @@ import { extractAmbientFeatures } from '../audio/AmbientFeatureExtractor';
 import {
   hasOrientationSupport,
   isSecureContext,
+  needsPermissionRequest,
+  requestOrientationPermission,
+  startOrientationListener,
+  stopOrientationListener,
+  getCurrentOrientation,
+  isOrientationListening,
   getOrientationStatus,
   normalizeOrientation,
   DeviceOrientation,
@@ -42,6 +48,9 @@ export interface AudioEngineState {
   captureState: CaptureState;
   hasPermission: boolean | null;
   hasOrientationSupport: boolean;
+  orientationPermissionGranted: boolean | null;
+  needsOrientationPermission: boolean;
+  isOrientationListening: boolean;
   error: string | null;
   audioLevel: number;
   lastCapture: AudioCaptureResult | null;
@@ -49,6 +58,7 @@ export interface AudioEngineState {
   lastFeatures: FeatureVector | null;
   lastAmbientFeatures: AmbientFeatureVector | null;
   lastOrientation: DeviceOrientation | null;
+  currentOrientation: DeviceOrientation | null; // Real-time orientation
 }
 
 export interface CaptureResult {
@@ -63,6 +73,9 @@ export interface UseAudioEngineReturn {
   captureAmbient: (durationSeconds?: number, includeOrientation?: boolean) => Promise<AmbientFeatureVector | null>;
   getCaptureResult: () => CaptureResult | null;
   requestPermission: () => Promise<boolean>;
+  requestOrientationPermission: () => Promise<boolean>;
+  startOrientationTracking: () => void;
+  stopOrientationTracking: () => void;
   startLevelMonitor: () => Promise<() => void>;
   reset: () => void;
 }
@@ -72,6 +85,9 @@ export function useAudioEngine(): UseAudioEngineReturn {
     captureState: 'idle',
     hasPermission: null,
     hasOrientationSupport: hasOrientationSupport() && isSecureContext(),
+    orientationPermissionGranted: null,
+    needsOrientationPermission: needsPermissionRequest(),
+    isOrientationListening: false,
     error: null,
     audioLevel: 0,
     lastCapture: null,
@@ -79,9 +95,11 @@ export function useAudioEngine(): UseAudioEngineReturn {
     lastFeatures: null,
     lastAmbientFeatures: null,
     lastOrientation: null,
+    currentOrientation: null,
   });
 
   const levelMonitorCleanup = useRef<(() => void) | null>(null);
+  const orientationCleanup = useRef<(() => void) | null>(null);
   const lastCaptureMode = useRef<CaptureMode | null>(null);
 
   // Check permission on mount
@@ -90,11 +108,14 @@ export function useAudioEngine(): UseAudioEngineReturn {
       setState((prev) => ({ ...prev, hasPermission }));
     });
 
-    // Check orientation support
+    // Check orientation support and permission status
     const orientationStatus = getOrientationStatus();
     setState((prev) => ({
       ...prev,
       hasOrientationSupport: orientationStatus.supported && orientationStatus.secure,
+      needsOrientationPermission: orientationStatus.needsPermission,
+      orientationPermissionGranted: orientationStatus.permissionState === 'granted' ? true :
+                                    orientationStatus.permissionState === 'denied' ? false : null,
     }));
 
     // Cleanup on unmount
@@ -102,6 +123,10 @@ export function useAudioEngine(): UseAudioEngineReturn {
       if (levelMonitorCleanup.current) {
         levelMonitorCleanup.current();
       }
+      if (orientationCleanup.current) {
+        orientationCleanup.current();
+      }
+      stopOrientationListener();
       closeAudioContext();
     };
   }, []);
@@ -136,6 +161,81 @@ export function useAudioEngine(): UseAudioEngineReturn {
   }, []);
 
   /**
+   * Request orientation permission (required on iOS 13+)
+   * Must be called from a user gesture (click/tap handler)
+   */
+  const requestOrientationPermissionFn = useCallback(async (): Promise<boolean> => {
+    console.log('[AudioEngine] Requesting orientation permission...');
+
+    try {
+      const granted = await requestOrientationPermission();
+      console.log('[AudioEngine] Orientation permission:', granted);
+
+      setState((prev) => ({
+        ...prev,
+        orientationPermissionGranted: granted,
+      }));
+
+      return granted;
+    } catch (error) {
+      console.error('[AudioEngine] Orientation permission error:', error);
+      setState((prev) => ({
+        ...prev,
+        orientationPermissionGranted: false,
+      }));
+      return false;
+    }
+  }, []);
+
+  /**
+   * Start continuous orientation tracking
+   * Provides real-time orientation updates
+   */
+  const startOrientationTrackingFn = useCallback(() => {
+    console.log('[AudioEngine] Starting orientation tracking...');
+
+    // Stop any existing listener
+    if (orientationCleanup.current) {
+      orientationCleanup.current();
+    }
+
+    const cleanup = startOrientationListener((orientation) => {
+      setState((prev) => ({
+        ...prev,
+        currentOrientation: orientation,
+        isOrientationListening: true,
+      }));
+    });
+
+    orientationCleanup.current = cleanup;
+
+    // Update state to indicate we're listening
+    setState((prev) => ({
+      ...prev,
+      isOrientationListening: isOrientationListening(),
+    }));
+  }, []);
+
+  /**
+   * Stop continuous orientation tracking
+   */
+  const stopOrientationTrackingFn = useCallback(() => {
+    console.log('[AudioEngine] Stopping orientation tracking...');
+
+    if (orientationCleanup.current) {
+      orientationCleanup.current();
+      orientationCleanup.current = null;
+    }
+
+    stopOrientationListener();
+
+    setState((prev) => ({
+      ...prev,
+      isOrientationListening: false,
+    }));
+  }, []);
+
+  /**
    * Capture audio with chirp and extract features
    */
   const capture = useCallback(async (
@@ -143,6 +243,10 @@ export function useAudioEngine(): UseAudioEngineReturn {
     includeOrientation: boolean = true
   ): Promise<FeatureVector | null> => {
     console.log('[AudioEngine] Starting chirp capture with mode:', mode);
+
+    // Capture orientation at the START of the capture (while user is holding the phone)
+    const orientationAtCapture = includeOrientation ? getCurrentOrientation() : null;
+    console.log('[AudioEngine] Orientation at capture start:', orientationAtCapture);
 
     setState((prev) => ({
       ...prev,
@@ -154,16 +258,21 @@ export function useAudioEngine(): UseAudioEngineReturn {
     }));
 
     try {
-      // Capture room response (now includes orientation)
+      // Capture room response (don't rely on its orientation capture - we already have it)
       console.log('[AudioEngine] Calling captureRoomResponse...');
-      const captureResult = await captureRoomResponse(mode, undefined, 0.8, includeOrientation);
+      const captureResult = await captureRoomResponse(mode, undefined, 0.8, false);
       console.log('[AudioEngine] Capture complete, processing...');
+
+      // Use the orientation we captured at the start
+      const finalOrientation = orientationAtCapture && orientationAtCapture.timestamp > 0
+        ? orientationAtCapture
+        : captureResult.orientation || null;
 
       setState((prev) => ({
         ...prev,
         captureState: 'processing',
         lastCapture: captureResult,
-        lastOrientation: captureResult.orientation || null,
+        lastOrientation: finalOrientation,
       }));
 
       // Extract impulse response
@@ -205,6 +314,10 @@ export function useAudioEngine(): UseAudioEngineReturn {
   ): Promise<AmbientFeatureVector | null> => {
     console.log('[AudioEngine] Starting ambient capture, duration:', durationSeconds);
 
+    // Capture orientation at the START of the capture (while user is holding the phone)
+    const orientationAtCapture = includeOrientation ? getCurrentOrientation() : null;
+    console.log('[AudioEngine] Orientation at capture start:', orientationAtCapture);
+
     setState((prev) => ({
       ...prev,
       captureState: 'capturing',
@@ -215,16 +328,21 @@ export function useAudioEngine(): UseAudioEngineReturn {
     }));
 
     try {
-      // Capture ambient audio
+      // Capture ambient audio (don't rely on its orientation capture - we already have it)
       console.log('[AudioEngine] Calling capturePassive...');
-      const captureResult = await capturePassive(durationSeconds, includeOrientation);
+      const captureResult = await capturePassive(durationSeconds, false);
       console.log('[AudioEngine] Ambient capture complete, processing...');
+
+      // Use the orientation we captured at the start
+      const finalOrientation = orientationAtCapture && orientationAtCapture.timestamp > 0
+        ? orientationAtCapture
+        : captureResult.orientation || null;
 
       setState((prev) => ({
         ...prev,
         captureState: 'processing',
         lastAmbientCapture: captureResult,
-        lastOrientation: captureResult.orientation || null,
+        lastOrientation: finalOrientation,
       }));
 
       // Extract ambient features
@@ -338,6 +456,9 @@ export function useAudioEngine(): UseAudioEngineReturn {
     captureAmbient,
     getCaptureResult,
     requestPermission,
+    requestOrientationPermission: requestOrientationPermissionFn,
+    startOrientationTracking: startOrientationTrackingFn,
+    stopOrientationTracking: stopOrientationTrackingFn,
     startLevelMonitor,
     reset,
   };

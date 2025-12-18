@@ -9,15 +9,24 @@ import {
   OrientationStats,
 } from '../hooks';
 import { ChirpMode } from '../audio';
-import OrientationCoverageIndicator from '../components/OrientationCoverageIndicator';
+import OrientationSphere from '../components/OrientationSphere';
 
 type ViewState = 'list' | 'add-room' | 'capture' | 'training';
 type CaptureModeUI = 'chirp-audible' | 'chirp-ultrasonic' | 'ambient';
 
 export default function TrainingPage() {
   const { state: roomsState, addRoom, removeRoom, refreshRooms } = useRooms();
-  const { state: audioState, capture, captureAmbient, requestPermission, reset: resetAudio } = useAudioEngine();
-  const { state: samplesState, addSample, getTrainingData, refreshSamples, getOrientationStats } = useSamples();
+  const {
+    state: audioState,
+    capture,
+    captureAmbient,
+    requestPermission,
+    requestOrientationPermission,
+    startOrientationTracking,
+    stopOrientationTracking,
+    reset: resetAudio
+  } = useAudioEngine();
+  const { state: samplesState, addSample, getTrainingData, refreshSamples, getOrientationStats, getSamplesForRoom } = useSamples();
   const { state: classifierState, train } = useRoomClassifier();
 
   const [viewState, setViewState] = useState<ViewState>('list');
@@ -28,6 +37,7 @@ export default function TrainingPage() {
   const [captureCount, setCaptureCount] = useState(0);
   const [orientationStats, setOrientationStats] = useState<OrientationStats | null>(null);
   const [allRoomsOrientationWarnings, setAllRoomsOrientationWarnings] = useState<string[]>([]);
+  const [sampleOrientations, setSampleOrientations] = useState<Array<[number, number, number]>>([]);
 
   // Refresh orientation stats when room changes or capture happens
   const refreshOrientationStats = useCallback(async () => {
@@ -36,6 +46,19 @@ export default function TrainingPage() {
       setOrientationStats(stats);
     }
   }, [selectedRoom, getOrientationStats]);
+
+  // Load sample orientations for 3D sphere visualization
+  const loadSampleOrientations = useCallback(async () => {
+    if (selectedRoom) {
+      const samples = await getSamplesForRoom(selectedRoom.id);
+      const orientations = samples
+        .map(s => s.features.orientation)
+        .filter((o): o is [number, number, number] => o !== undefined);
+      setSampleOrientations(orientations);
+    } else {
+      setSampleOrientations([]);
+    }
+  }, [selectedRoom, getSamplesForRoom]);
 
   // Check orientation diversity across all rooms when on list view
   const checkAllRoomsOrientationDiversity = useCallback(async () => {
@@ -55,12 +78,32 @@ export default function TrainingPage() {
     setAllRoomsOrientationWarnings(warnings);
   }, [roomsState.rooms, getOrientationStats]);
 
-  // Refresh stats when entering capture mode or after capture
+  // Refresh stats and load sample orientations when entering capture mode or after capture
   useEffect(() => {
     if (viewState === 'capture' && selectedRoom) {
       refreshOrientationStats();
+      loadSampleOrientations();
     }
-  }, [viewState, selectedRoom, captureCount, refreshOrientationStats]);
+  }, [viewState, selectedRoom, captureCount, refreshOrientationStats, loadSampleOrientations]);
+
+  // Start/stop orientation tracking when entering/exiting capture mode
+  useEffect(() => {
+    if (viewState === 'capture' && includeOrientation) {
+      // Request permission on iOS if needed, then start tracking
+      if (audioState.needsOrientationPermission && audioState.orientationPermissionGranted === null) {
+        // Permission will be requested on first capture button press
+        console.log('[TrainingPage] iOS orientation permission needed, will request on capture');
+      } else {
+        startOrientationTracking();
+      }
+    } else {
+      stopOrientationTracking();
+    }
+
+    return () => {
+      stopOrientationTracking();
+    };
+  }, [viewState, includeOrientation, audioState.needsOrientationPermission, audioState.orientationPermissionGranted, startOrientationTracking, stopOrientationTracking]);
 
   // Check all rooms orientation when on list view
   useEffect(() => {
@@ -116,6 +159,15 @@ export default function TrainingPage() {
       return;
     }
 
+    // Request iOS orientation permission if needed (must be in a user gesture handler)
+    if (includeOrientation && audioState.needsOrientationPermission && audioState.orientationPermissionGranted === null) {
+      console.log('[TrainingPage] Requesting iOS orientation permission...');
+      const granted = await requestOrientationPermission();
+      if (granted) {
+        startOrientationTracking();
+      }
+    }
+
     resetAudio();
 
     if (captureMode === 'ambient') {
@@ -125,7 +177,7 @@ export default function TrainingPage() {
       console.log('[TrainingPage] Ambient capture result:', features ? 'success' : 'failed');
 
       if (features) {
-        // Get orientation if available
+        // Get orientation from the capture (now captured at start of capture)
         const orientation = audioState.lastOrientation
           ? [
               (audioState.lastOrientation.alpha ?? 0) / 360,
@@ -134,6 +186,7 @@ export default function TrainingPage() {
             ] as [number, number, number]
           : undefined;
 
+        console.log('[TrainingPage] Orientation captured:', orientation);
         console.log('[TrainingPage] Saving ambient sample...');
         await addSample(selectedRoom.id, {
           mode: 'ambient-manual',
@@ -162,7 +215,7 @@ export default function TrainingPage() {
       console.log('[TrainingPage] Capture result:', features ? 'success' : 'failed');
 
       if (features) {
-        // Get orientation if available
+        // Get orientation from the capture (now captured at start of capture)
         const orientation = audioState.lastOrientation
           ? [
               (audioState.lastOrientation.alpha ?? 0) / 360,
@@ -171,6 +224,7 @@ export default function TrainingPage() {
             ] as [number, number, number]
           : undefined;
 
+        console.log('[TrainingPage] Orientation captured:', orientation);
         console.log('[TrainingPage] Saving chirp sample...');
         await addSample(selectedRoom.id, {
           mode: 'chirp',
@@ -271,7 +325,7 @@ export default function TrainingPage() {
         </header>
 
         <div className="max-w-md mx-auto">
-          {/* Capture Status with Orientation Coverage */}
+          {/* Capture Status with 3D Orientation Sphere */}
           <div className="card mb-6">
             <div className="flex items-center justify-between gap-4">
               {/* Sample count */}
@@ -285,17 +339,44 @@ export default function TrainingPage() {
                 )}
               </div>
 
-              {/* Orientation coverage indicator */}
-              {includeOrientation && orientationStats && (
+              {/* 3D Orientation Sphere */}
+              {includeOrientation && (
                 <div className="flex-shrink-0">
-                  <OrientationCoverageIndicator
-                    stats={orientationStats}
-                    size={100}
-                    showRecommendation={true}
+                  <OrientationSphere
+                    currentOrientation={audioState.currentOrientation}
+                    sampleOrientations={sampleOrientations}
+                    size={130}
+                    showLabels={true}
                   />
                 </div>
               )}
             </div>
+
+            {/* Orientation diversity stats (compact) */}
+            {includeOrientation && orientationStats && orientationStats.samplesWithOrientation > 0 && (
+              <div className="mt-4 pt-4 border-t border-dark-600">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-400">Diversity Score</span>
+                  <span className={`font-medium ${
+                    orientationStats.diversityScore >= 0.7 ? 'text-green-400' :
+                    orientationStats.diversityScore >= 0.4 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>
+                    {Math.round(orientationStats.diversityScore * 100)}%
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs mt-1">
+                  <span className="text-gray-400">Coverage (N/E/S/W)</span>
+                  <span className="text-gray-300">
+                    {orientationStats.quadrantCounts.north}/{orientationStats.quadrantCounts.east}/{orientationStats.quadrantCounts.south}/{orientationStats.quadrantCounts.west}
+                  </span>
+                </div>
+                {orientationStats.warnings.length > 0 && (
+                  <p className="text-xs text-yellow-400 mt-2">
+                    {orientationStats.warnings[0]}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Capture Mode Selection */}
