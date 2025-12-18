@@ -10,6 +10,14 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { DeviceOrientation } from '../audio/OrientationCapture';
 
+interface OctantCoverage {
+  octantsCovered: number;
+  octantCounts: {
+    upperN: number; upperE: number; upperS: number; upperW: number;
+    lowerN: number; lowerE: number; lowerS: number; lowerW: number;
+  };
+}
+
 interface Props {
   /** Current device orientation (real-time) */
   currentOrientation: DeviceOrientation | null;
@@ -19,6 +27,8 @@ interface Props {
   size?: number;
   /** Whether to show the coordinate axes labels */
   showLabels?: boolean;
+  /** Optional octant coverage stats */
+  octantCoverage?: OctantCoverage;
 }
 
 // 3D point type
@@ -85,25 +95,43 @@ function orientationToRotation(orientation: DeviceOrientation | null): { alpha: 
   return { alpha, beta, gamma };
 }
 
-// Convert normalized sample orientation back to degrees then to radians
+/**
+ * Convert normalized sample orientation to a point on the sphere surface
+ * Uses the phone's up-vector (local Y-axis) transformed by all three Euler angles
+ *
+ * Device orientation Euler angles:
+ * - alpha (yaw): rotation around world Z-axis (compass heading)
+ * - beta (pitch): rotation around device X-axis (tilt forward/back)
+ * - gamma (roll): rotation around device Y-axis (tilt left/right)
+ *
+ * We compute where the phone's up-vector (0, 1, 0) points in world space
+ */
 function sampleOrientationToPoint(normalized: [number, number, number], radius: number): Point3D {
   // Denormalize: stored as [alpha/360, (beta+180)/360, (gamma+90)/180]
   const alphaDeg = normalized[0] * 360;
   const betaDeg = normalized[1] * 360 - 180;
-  // Note: gammaDeg (roll) is not used for sphere positioning - only alpha (yaw) and beta (pitch)
+  const gammaDeg = normalized[2] * 180 - 90;
 
   // Convert to radians
-  const alphaRad = (alphaDeg * Math.PI) / 180;
-  const betaRad = (betaDeg * Math.PI) / 180;
+  const alpha = (alphaDeg * Math.PI) / 180;
+  const beta = (betaDeg * Math.PI) / 180;
+  const gamma = (gammaDeg * Math.PI) / 180;
 
-  // Place point on sphere surface based on alpha (yaw) and beta (pitch)
-  // Alpha controls rotation around Y axis (compass heading)
-  // Beta controls elevation (pitch up/down)
-  const x = radius * Math.cos(betaRad) * Math.sin(alphaRad);
-  const y = radius * Math.sin(betaRad);
-  const z = radius * Math.cos(betaRad) * Math.cos(alphaRad);
+  // Start with device's local up-vector (Y-axis)
+  let upVector: Point3D = { x: 0, y: 1, z: 0 };
 
-  return { x, y, z };
+  // Apply device orientation rotations (same order as axes visualization)
+  // Order: Z (roll/gamma), X (pitch/beta), Y (yaw/alpha)
+  upVector = rotateZ(upVector, gamma);
+  upVector = rotateX(upVector, beta);
+  upVector = rotateY(upVector, alpha);
+
+  // Scale to sphere surface
+  return {
+    x: upVector.x * radius,
+    y: upVector.y * radius,
+    z: upVector.z * radius,
+  };
 }
 
 export default function OrientationSphere({
@@ -111,6 +139,7 @@ export default function OrientationSphere({
   sampleOrientations,
   size = 150,
   showLabels = true,
+  octantCoverage,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
@@ -269,7 +298,7 @@ export default function OrientationSphere({
       }
     }
 
-    // Draw sample orientation points
+    // Draw sample orientation points (green dots)
     for (const sampleOrientation of sampleOrientations) {
       let point = sampleOrientationToPoint(sampleOrientation, radius * 1.05);
 
@@ -301,6 +330,59 @@ export default function OrientationSphere({
         ctx.arc(projected.x, projected.y, pointRadius, 0, Math.PI * 2);
         ctx.fillStyle = '#22c55e';
         ctx.fill();
+      }
+    }
+
+    // Draw current phone up-vector position (yellow pulsing marker)
+    // This shows where the next capture will be placed on the sphere
+    if (currentOrientation && currentOrientation.timestamp > 0) {
+      // Compute the phone's up-vector using all three Euler angles
+      let upVector: Point3D = { x: 0, y: 1, z: 0 };
+      upVector = rotateZ(upVector, rotation.gamma);
+      upVector = rotateX(upVector, rotation.beta);
+      upVector = rotateY(upVector, rotation.alpha);
+
+      // Scale to sphere surface
+      let currentPoint: Point3D = {
+        x: upVector.x * radius * 1.05,
+        y: upVector.y * radius * 1.05,
+        z: upVector.z * radius * 1.05,
+      };
+
+      // Apply view rotation
+      currentPoint = rotateX(currentPoint, viewRotX);
+      currentPoint = rotateY(currentPoint, viewRotY);
+
+      // Draw if visible
+      if (currentPoint.z > -50) {
+        const projected = project(currentPoint, size);
+        const pointRadius = 6 * projected.scale;
+
+        // Draw pulsing outer ring (yellow/amber)
+        const pulse = (Math.sin(Date.now() / 200) + 1) / 2; // 0-1 pulsing
+        const outerRadius = pointRadius * (1.5 + pulse * 0.5);
+
+        ctx.beginPath();
+        ctx.arc(projected.x, projected.y, outerRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(251, 191, 36, ${0.5 + pulse * 0.3})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Draw solid center (amber)
+        ctx.beginPath();
+        ctx.arc(projected.x, projected.y, pointRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fill();
+
+        // Draw crosshair
+        ctx.strokeStyle = '#1f2937';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(projected.x - pointRadius * 0.6, projected.y);
+        ctx.lineTo(projected.x + pointRadius * 0.6, projected.y);
+        ctx.moveTo(projected.x, projected.y - pointRadius * 0.6);
+        ctx.lineTo(projected.x, projected.y + pointRadius * 0.6);
+        ctx.stroke();
       }
     }
 
@@ -400,6 +482,49 @@ export default function OrientationSphere({
       {sampleOrientations.length > 0 && (
         <div className="text-xs text-green-400">
           {sampleOrientations.length} sample{sampleOrientations.length !== 1 ? 's' : ''} shown
+        </div>
+      )}
+
+      {/* Octant coverage display */}
+      {octantCoverage && (
+        <div className="mt-2 text-xs">
+          <div className="text-gray-400 text-center mb-1">
+            Octant Coverage: {octantCoverage.octantsCovered}/8
+          </div>
+          <div className="flex flex-col gap-1">
+            {/* Upper hemisphere */}
+            <div className="flex justify-center gap-1">
+              {(['upperN', 'upperE', 'upperS', 'upperW'] as const).map((octant) => (
+                <div
+                  key={octant}
+                  className={`w-6 h-6 rounded text-[10px] flex items-center justify-center ${
+                    octantCoverage.octantCounts[octant] > 0
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-700 text-gray-400'
+                  }`}
+                  title={`Upper ${octant.slice(-1)}: ${octantCoverage.octantCounts[octant]} samples`}
+                >
+                  {octant.slice(-1)}↑
+                </div>
+              ))}
+            </div>
+            {/* Lower hemisphere */}
+            <div className="flex justify-center gap-1">
+              {(['lowerN', 'lowerE', 'lowerS', 'lowerW'] as const).map((octant) => (
+                <div
+                  key={octant}
+                  className={`w-6 h-6 rounded text-[10px] flex items-center justify-center ${
+                    octantCoverage.octantCounts[octant] > 0
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-700 text-gray-400'
+                  }`}
+                  title={`Lower ${octant.slice(-1)}: ${octantCoverage.octantCounts[octant]} samples`}
+                >
+                  {octant.slice(-1)}↓
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

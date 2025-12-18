@@ -7,6 +7,11 @@ export {
   hasMinimumOrientationDiversity,
   getRecommendedOrientation,
   formatOrientationStats,
+  getOctantVisualizationData,
 } from './orientationAnalysis';
 
-export type { OrientationStats } from './orientationAnalysis';
+export type {
+  OrientationStats,
+  OctantCounts,
+  OctantName,
+} from './orientationAnalysis';

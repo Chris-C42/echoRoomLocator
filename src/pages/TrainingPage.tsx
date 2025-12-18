@@ -347,6 +347,10 @@ export default function TrainingPage() {
                     sampleOrientations={sampleOrientations}
                     size={130}
                     showLabels={true}
+                    octantCoverage={orientationStats ? {
+                      octantsCovered: orientationStats.octantsCovered,
+                      octantCounts: orientationStats.octantCounts,
+                    } : undefined}
                   />
                 </div>
               )}
@@ -365,9 +369,12 @@ export default function TrainingPage() {
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-xs mt-1">
-                  <span className="text-gray-400">Coverage (N/E/S/W)</span>
-                  <span className="text-gray-300">
-                    {orientationStats.quadrantCounts.north}/{orientationStats.quadrantCounts.east}/{orientationStats.quadrantCounts.south}/{orientationStats.quadrantCounts.west}
+                  <span className="text-gray-400">Octant Coverage</span>
+                  <span className={`font-medium ${
+                    orientationStats.octantsCovered >= 6 ? 'text-green-400' :
+                    orientationStats.octantsCovered >= 4 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>
+                    {orientationStats.octantsCovered}/8
                   </span>
                 </div>
                 {orientationStats.warnings.length > 0 && (

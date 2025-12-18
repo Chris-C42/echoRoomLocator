@@ -3,7 +3,34 @@
  *
  * Analyzes orientation diversity across samples to help ensure
  * training data doesn't have orientation bias.
+ *
+ * Uses 8 octants based on the phone's up-vector:
+ * - Upper hemisphere (phone tilted up): upperN, upperE, upperS, upperW
+ * - Lower hemisphere (phone tilted down): lowerN, lowerE, lowerS, lowerW
  */
+
+// 3D point type for up-vector calculations
+interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+// Octant names
+export type OctantName =
+  | 'upperN' | 'upperE' | 'upperS' | 'upperW'
+  | 'lowerN' | 'lowerE' | 'lowerS' | 'lowerW';
+
+export interface OctantCounts {
+  upperN: number;  // Upper hemisphere, facing North
+  upperE: number;  // Upper hemisphere, facing East
+  upperS: number;  // Upper hemisphere, facing South
+  upperW: number;  // Upper hemisphere, facing West
+  lowerN: number;  // Lower hemisphere, facing North
+  lowerE: number;  // Lower hemisphere, facing East
+  lowerS: number;  // Lower hemisphere, facing South
+  lowerW: number;  // Lower hemisphere, facing West
+}
 
 export interface OrientationStats {
   // Number of samples with orientation data
@@ -11,24 +38,121 @@ export interface OrientationStats {
   totalSamples: number;
 
   // Coverage metrics (0-1, where 1 = full coverage)
-  yawCoverage: number;      // Coverage around horizontal plane (alpha)
-  pitchCoverage: number;    // Coverage of tilt angles (beta)
-  rollCoverage: number;     // Coverage of roll angles (gamma)
-  overallCoverage: number;  // Combined coverage score
+  octantCoverage: number;   // How many of the 8 octants have samples (0-1)
+  overallCoverage: number;  // Same as octantCoverage for consistency
 
-  // Quadrant distribution (how many samples in each direction)
+  // Octant distribution (how many samples in each of 8 octants)
+  octantCounts: OctantCounts;
+
+  // Legacy quadrant counts (for backward compatibility)
   quadrantCounts: {
-    north: number;  // alpha 315-45°
-    east: number;   // alpha 45-135°
-    south: number;  // alpha 135-225°
-    west: number;   // alpha 225-315°
+    north: number;
+    east: number;
+    south: number;
+    west: number;
   };
 
   // Diversity score (0-1, higher = more diverse)
   diversityScore: number;
 
+  // Number of octants covered (0-8)
+  octantsCovered: number;
+
   // Warnings
   warnings: string[];
+}
+
+// Rotate point around X axis
+function rotateX(point: Point3D, angle: number): Point3D {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: point.x,
+    y: point.y * cos - point.z * sin,
+    z: point.y * sin + point.z * cos,
+  };
+}
+
+// Rotate point around Y axis
+function rotateY(point: Point3D, angle: number): Point3D {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: point.x * cos + point.z * sin,
+    y: point.y,
+    z: -point.x * sin + point.z * cos,
+  };
+}
+
+// Rotate point around Z axis
+function rotateZ(point: Point3D, angle: number): Point3D {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
+    z: point.z,
+  };
+}
+
+/**
+ * Compute the phone's up-vector from normalized orientation values
+ * Uses all three Euler angles (alpha, beta, gamma)
+ *
+ * @param normalized - [alpha/360, (beta+180)/360, (gamma+90)/180]
+ * @returns The phone's up-vector in world coordinates
+ */
+function computeUpVector(normalized: [number, number, number]): Point3D {
+  // Denormalize: stored as [alpha/360, (beta+180)/360, (gamma+90)/180]
+  const alphaDeg = normalized[0] * 360;
+  const betaDeg = normalized[1] * 360 - 180;
+  const gammaDeg = normalized[2] * 180 - 90;
+
+  // Convert to radians
+  const alpha = (alphaDeg * Math.PI) / 180;
+  const beta = (betaDeg * Math.PI) / 180;
+  const gamma = (gammaDeg * Math.PI) / 180;
+
+  // Start with device's local up-vector (Y-axis)
+  let upVector: Point3D = { x: 0, y: 1, z: 0 };
+
+  // Apply device orientation rotations (ZXY order: gamma/roll, beta/pitch, alpha/yaw)
+  upVector = rotateZ(upVector, gamma);
+  upVector = rotateX(upVector, beta);
+  upVector = rotateY(upVector, alpha);
+
+  return upVector;
+}
+
+/**
+ * Determine which octant a point belongs to based on its up-vector
+ *
+ * Octants are divided by:
+ * - Hemisphere: Y component (positive = upper, negative = lower)
+ * - Quadrant: Based on which horizontal direction the up-vector is tilted toward
+ *   - North: Z > 0 and |Z| > |X|
+ *   - East: X > 0 and |X| > |Z|
+ *   - South: Z < 0 and |Z| > |X|
+ *   - West: X < 0 and |X| > |Z|
+ */
+function getOctant(upVector: Point3D): OctantName {
+  const isUpper = upVector.y >= 0;
+  const prefix = isUpper ? 'upper' : 'lower';
+
+  // Determine horizontal quadrant based on X and Z components
+  const absX = Math.abs(upVector.x);
+  const absZ = Math.abs(upVector.z);
+
+  let direction: 'N' | 'E' | 'S' | 'W';
+  if (absZ >= absX) {
+    // Primarily North or South
+    direction = upVector.z >= 0 ? 'N' : 'S';
+  } else {
+    // Primarily East or West
+    direction = upVector.x >= 0 ? 'E' : 'W';
+  }
+
+  return `${prefix}${direction}` as OctantName;
 }
 
 /**
@@ -44,50 +168,49 @@ export function analyzeOrientationDiversity(
   const totalSamples = orientations.length;
   const samplesWithOrientation = validOrientations.length;
 
+  // Initialize octant counts
+  const octantCounts: OctantCounts = {
+    upperN: 0, upperE: 0, upperS: 0, upperW: 0,
+    lowerN: 0, lowerE: 0, lowerS: 0, lowerW: 0,
+  };
+
+  // Legacy quadrant counts (based on horizontal direction only)
+  const quadrantCounts = { north: 0, east: 0, south: 0, west: 0 };
+
   if (samplesWithOrientation === 0) {
     return {
       samplesWithOrientation: 0,
       totalSamples,
-      yawCoverage: 0,
-      pitchCoverage: 0,
-      rollCoverage: 0,
+      octantCoverage: 0,
       overallCoverage: 0,
-      quadrantCounts: { north: 0, east: 0, south: 0, west: 0 },
+      octantCounts,
+      quadrantCounts,
       diversityScore: 0,
+      octantsCovered: 0,
       warnings: ['No orientation data available'],
     };
   }
 
-  // Extract normalized values (stored as 0-1 range)
-  const alphas = validOrientations.map((o) => o[0] * 360); // yaw 0-360
-  const betas = validOrientations.map((o) => o[1] * 360 - 180); // pitch -180 to 180
-  const gammas = validOrientations.map((o) => o[2] * 180 - 90); // roll -90 to 90
+  // Compute octant distribution using up-vector
+  for (const orientation of validOrientations) {
+    const upVector = computeUpVector(orientation);
+    const octant = getOctant(upVector);
+    octantCounts[octant]++;
 
-  // Compute quadrant distribution (based on yaw/alpha)
-  const quadrantCounts = { north: 0, east: 0, south: 0, west: 0 };
-  for (const alpha of alphas) {
-    if (alpha >= 315 || alpha < 45) quadrantCounts.north++;
-    else if (alpha >= 45 && alpha < 135) quadrantCounts.east++;
-    else if (alpha >= 135 && alpha < 225) quadrantCounts.south++;
-    else quadrantCounts.west++;
+    // Also update legacy quadrant counts (extract direction from octant name)
+    const direction = octant.slice(-1).toLowerCase() as 'n' | 'e' | 's' | 'w';
+    const directionMap: Record<string, 'north' | 'east' | 'south' | 'west'> = {
+      n: 'north', e: 'east', s: 'south', w: 'west'
+    };
+    quadrantCounts[directionMap[direction]]++;
   }
 
-  // Compute yaw coverage (how much of the 360° is covered)
-  const yawCoverage = computeAngularCoverage(alphas, 360, 4); // 4 bins of 90°
+  // Count how many octants have at least one sample
+  const octantsCovered = Object.values(octantCounts).filter((count) => count > 0).length;
+  const octantCoverage = octantsCovered / 8;
 
-  // Compute pitch coverage (how much of the -180 to 180 range is covered)
-  // Most relevant range is -90 to 90 (phone facing up to facing down)
-  const relevantBetas = betas.map((b) => Math.max(-90, Math.min(90, b)));
-  const pitchCoverage = computeLinearCoverage(relevantBetas, -90, 90, 3); // 3 bins
-
-  // Compute roll coverage (how much of the -90 to 90 range is covered)
-  const rollCoverage = computeLinearCoverage(gammas, -90, 90, 3); // 3 bins
-
-  // Overall coverage is weighted average (yaw most important for acoustic variation)
-  const overallCoverage = yawCoverage * 0.6 + pitchCoverage * 0.25 + rollCoverage * 0.15;
-
-  // Compute diversity score (entropy-based)
-  const diversityScore = computeDiversityScore(quadrantCounts, samplesWithOrientation);
+  // Compute diversity score (entropy-based, now over 8 octants)
+  const diversityScore = computeOctantDiversityScore(octantCounts, samplesWithOrientation);
 
   // Generate warnings
   const warnings: string[] = [];
@@ -96,91 +219,67 @@ export function analyzeOrientationDiversity(
     warnings.push(`Only ${samplesWithOrientation}/${totalSamples} samples have orientation data`);
   }
 
-  if (yawCoverage < 0.5) {
-    warnings.push('Low yaw coverage - try rotating phone to face different directions');
+  if (octantsCovered < 4) {
+    warnings.push(`Only ${octantsCovered}/8 octants covered - try different phone orientations`);
   }
 
   if (diversityScore < 0.5) {
-    const dominant = Object.entries(quadrantCounts)
-      .sort((a, b) => b[1] - a[1])[0];
-    warnings.push(`Most samples facing ${dominant[0]} (${dominant[1]}/${samplesWithOrientation})`);
+    // Find the dominant octant
+    const entries = Object.entries(octantCounts) as [OctantName, number][];
+    const sorted = entries.sort((a, b) => b[1] - a[1]);
+    const dominant = sorted[0];
+    if (dominant[1] > 0) {
+      warnings.push(`Most samples in ${formatOctantName(dominant[0])} (${dominant[1]}/${samplesWithOrientation})`);
+    }
   }
 
-  // Check for single-orientation bias
-  const maxQuadrant = Math.max(...Object.values(quadrantCounts));
-  if (maxQuadrant > samplesWithOrientation * 0.7) {
-    warnings.push('Strong orientation bias detected - samples mostly from one direction');
+  // Check for single-octant bias
+  const maxOctant = Math.max(...Object.values(octantCounts));
+  if (maxOctant > samplesWithOrientation * 0.5) {
+    warnings.push('Strong orientation bias detected - samples mostly from one octant');
   }
 
   return {
     samplesWithOrientation,
     totalSamples,
-    yawCoverage,
-    pitchCoverage,
-    rollCoverage,
-    overallCoverage,
+    octantCoverage,
+    overallCoverage: octantCoverage,
+    octantCounts,
     quadrantCounts,
     diversityScore,
+    octantsCovered,
     warnings,
   };
 }
 
 /**
- * Compute angular coverage (for circular values like yaw)
- * Returns 0-1 where 1 means all bins have at least one sample
+ * Format octant name for display
  */
-function computeAngularCoverage(angles: number[], fullRange: number, numBins: number): number {
-  const binSize = fullRange / numBins;
-  const bins = new Array(numBins).fill(0);
-
-  for (const angle of angles) {
-    const normalizedAngle = ((angle % fullRange) + fullRange) % fullRange;
-    const bin = Math.floor(normalizedAngle / binSize) % numBins;
-    bins[bin]++;
-  }
-
-  const filledBins = bins.filter((count) => count > 0).length;
-  return filledBins / numBins;
+function formatOctantName(octant: OctantName): string {
+  const names: Record<OctantName, string> = {
+    upperN: 'Upper North',
+    upperE: 'Upper East',
+    upperS: 'Upper South',
+    upperW: 'Upper West',
+    lowerN: 'Lower North',
+    lowerE: 'Lower East',
+    lowerS: 'Lower South',
+    lowerW: 'Lower West',
+  };
+  return names[octant];
 }
 
 /**
- * Compute linear coverage (for non-circular values like pitch/roll)
- * Returns 0-1 where 1 means all bins have at least one sample
+ * Compute diversity score based on octant distribution
+ * Uses normalized entropy (0 = all in one octant, 1 = uniform distribution)
  */
-function computeLinearCoverage(
-  values: number[],
-  minVal: number,
-  maxVal: number,
-  numBins: number
-): number {
-  const range = maxVal - minVal;
-  const binSize = range / numBins;
-  const bins = new Array(numBins).fill(0);
-
-  for (const value of values) {
-    const normalizedValue = Math.max(minVal, Math.min(maxVal, value));
-    const bin = Math.min(
-      numBins - 1,
-      Math.floor((normalizedValue - minVal) / binSize)
-    );
-    bins[bin]++;
-  }
-
-  const filledBins = bins.filter((count) => count > 0).length;
-  return filledBins / numBins;
-}
-
-/**
- * Compute diversity score based on quadrant distribution
- * Uses normalized entropy (0 = all in one quadrant, 1 = uniform distribution)
- */
-function computeDiversityScore(
-  quadrantCounts: { north: number; east: number; south: number; west: number },
+function computeOctantDiversityScore(
+  octantCounts: OctantCounts,
   totalSamples: number
 ): number {
   if (totalSamples === 0) return 0;
 
-  const counts = Object.values(quadrantCounts);
+  const counts = Object.values(octantCounts);
   const probabilities = counts.map((c) => c / totalSamples);
 
   // Compute entropy
@@ -191,8 +290,8 @@ function computeDiversityScore(
     }
   }
 
-  // Normalize by max entropy (log2(4) = 2 for 4 quadrants)
-  const maxEntropy = Math.log2(4);
+  // Normalize by max entropy (log2(8) = 3 for 8 octants)
+  const maxEntropy = Math.log2(8);
   return entropy / maxEntropy;
 }
 
@@ -215,27 +314,32 @@ export function hasMinimumOrientationDiversity(
 
 /**
  * Get recommended next orientation for capturing
- * Returns the quadrant with fewest samples
+ * Returns the octant with fewest samples
  */
 export function getRecommendedOrientation(
   stats: OrientationStats
-): { direction: string; description: string } {
-  const { quadrantCounts } = stats;
+): { direction: string; description: string; octant: OctantName } {
+  const { octantCounts } = stats;
 
-  const entries = Object.entries(quadrantCounts) as [string, number][];
+  const entries = Object.entries(octantCounts) as [OctantName, number][];
   const sorted = entries.sort((a, b) => a[1] - b[1]);
-  const lowestQuadrant = sorted[0][0];
+  const lowestOctant = sorted[0][0];
 
-  const descriptions: Record<string, string> = {
-    north: 'Face the phone towards 12 o\'clock',
-    east: 'Face the phone towards 3 o\'clock (right)',
-    south: 'Face the phone towards 6 o\'clock (behind you)',
-    west: 'Face the phone towards 9 o\'clock (left)',
+  const descriptions: Record<OctantName, string> = {
+    upperN: 'Tilt phone up, screen facing North (12 o\'clock)',
+    upperE: 'Tilt phone up, screen facing East (3 o\'clock)',
+    upperS: 'Tilt phone up, screen facing South (6 o\'clock)',
+    upperW: 'Tilt phone up, screen facing West (9 o\'clock)',
+    lowerN: 'Tilt phone down, screen facing North (12 o\'clock)',
+    lowerE: 'Tilt phone down, screen facing East (3 o\'clock)',
+    lowerS: 'Tilt phone down, screen facing South (6 o\'clock)',
+    lowerW: 'Tilt phone down, screen facing West (9 o\'clock)',
   };
 
   return {
-    direction: lowestQuadrant,
-    description: descriptions[lowestQuadrant] || 'Rotate phone to a new direction',
+    direction: formatOctantName(lowestOctant),
+    description: descriptions[lowestOctant],
+    octant: lowestOctant,
   };
 }
 
@@ -247,8 +351,30 @@ export function formatOrientationStats(stats: OrientationStats): string {
     return 'No orientation data';
   }
 
-  const diversityPct = Math.round(stats.diversityScore * 100);
-  const coveragePct = Math.round(stats.overallCoverage * 100);
+  return `${stats.octantsCovered}/8 octants covered | Diversity: ${Math.round(stats.diversityScore * 100)}%`;
+}
 
-  return `Diversity: ${diversityPct}% | Coverage: ${coveragePct}%`;
+/**
+ * Get octant coverage visualization data
+ * Returns an array of octant info for UI display
+ */
+export function getOctantVisualizationData(stats: OrientationStats): Array<{
+  name: OctantName;
+  displayName: string;
+  count: number;
+  isCovered: boolean;
+  isUpper: boolean;
+}> {
+  const octants: OctantName[] = [
+    'upperN', 'upperE', 'upperS', 'upperW',
+    'lowerN', 'lowerE', 'lowerS', 'lowerW',
+  ];
+
+  return octants.map((octant) => ({
+    name: octant,
+    displayName: formatOctantName(octant),
+    count: stats.octantCounts[octant],
+    isCovered: stats.octantCounts[octant] > 0,
+    isUpper: octant.startsWith('upper'),
+  }));
 }
