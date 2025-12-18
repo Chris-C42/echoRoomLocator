@@ -107,6 +107,116 @@ export const FEATURE_VECTOR_LENGTH = 60;
 // Chirp features with orientation: 60 + 3 = 63
 export const CHIRP_FEATURE_LENGTH = 63;
 
+// Mixing time (ms) - boundary between early reflections and late reverb
+// After this time, the sound field becomes statistically diffuse
+export const MIXING_TIME_MS = 80;
+
+/**
+ * Feature groups by orientation sensitivity
+ * Based on acoustic research: late reverberation is largely position/orientation independent
+ */
+export interface OrientationAwareFeatures {
+  // Orientation-INVARIANT features (from late/diffuse reverb)
+  // These characterize the room independently of source/receiver position
+  lateReverbFeatures: LateReverbFeatures;
+
+  // Orientation-SENSITIVE features (from early reflections)
+  // These depend on the specific source-receiver geometry
+  earlyReflectionFeatures: EarlyReflectionFeatures;
+
+  // Combined raw vector with feature group indices
+  raw: number[];
+
+  // Metadata about feature composition
+  featureMetadata: FeatureMetadata;
+}
+
+/**
+ * Late reverberation features - orientation INVARIANT
+ * These are the "reverberation fingerprint" of the room
+ */
+export interface LateReverbFeatures {
+  // RT60 computed from late portion only (more stable)
+  lateRT60: number;
+
+  // Decay rate per octave band in late reverb (7 values)
+  lateDecayRates: number[];
+
+  // Late reverb spectral envelope (7 octave bands)
+  lateSpectralEnvelope: number[];
+
+  // Late reverb energy (total energy after mixing time)
+  lateEnergy: number;
+
+  // Spectral centroid of late reverb
+  lateSpectralCentroid: number;
+
+  // Spectral flatness of late reverb (diffuse = flatter)
+  lateSpectralFlatness: number;
+
+  // Low frequency room mode energy (<300Hz) - orientation invariant
+  lowFreqModeEnergy: number;
+
+  // Estimated mixing time (when field becomes diffuse)
+  mixingTime: number;
+}
+
+/**
+ * Early reflection features - orientation SENSITIVE
+ * Use with caution, consider lower weight in model
+ */
+export interface EarlyReflectionFeatures {
+  // Original features from early portion
+  edt: number;                    // Early decay time
+  c50: number;                    // Clarity ratio 50ms
+  c80: number;                    // Clarity ratio 80ms
+  earlyReflections: number[];     // 8 time bins (0-80ms)
+
+  // Spectral features (computed from full IR, orientation-sensitive)
+  spectralCentroid: number;
+  spectralRolloff: number;
+  spectralFlux: number;
+  spectralFlatness: number;
+
+  // MFCC (computed from full IR)
+  mfccMean: number[];
+  mfccVariance: number[];
+
+  // Full IR octave bands (orientation-sensitive)
+  octaveBands: number[];
+}
+
+/**
+ * Metadata about feature extraction
+ */
+export interface FeatureMetadata {
+  // Number of features in each group
+  lateFeatureCount: number;
+  earlyFeatureCount: number;
+
+  // Indices in raw vector
+  lateFeatureStartIdx: number;
+  lateFeatureEndIdx: number;
+  earlyFeatureStartIdx: number;
+  earlyFeatureEndIdx: number;
+
+  // Detected mixing time for this sample
+  detectedMixingTimeMs: number;
+
+  // Confidence in late reverb estimation (0-1)
+  // Low if IR is too short or noisy
+  lateReverbConfidence: number;
+}
+
+// Late reverb feature count: 1 + 7 + 7 + 1 + 1 + 1 + 1 + 1 = 20
+export const LATE_REVERB_FEATURE_LENGTH = 20;
+
+// Early reflection feature count: 1 + 1 + 1 + 8 + 4 + 13 + 13 + 7 = 48
+export const EARLY_REFLECTION_FEATURE_LENGTH = 48;
+
+// Extended feature vector: late (20) + early (48) = 68
+export const EXTENDED_FEATURE_VECTOR_LENGTH = 68;
+
 // Ambient feature vector for passive audio recording
 export interface AmbientFeatureVector {
   // Spectral features (temporal statistics)

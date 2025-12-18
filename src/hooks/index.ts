@@ -23,6 +23,9 @@ export type {
   UseSamplesReturn,
 } from './useSamples';
 
+// Re-export orientation stats type for convenience
+export type { OrientationStats } from '../utils';
+
 export { useRoomClassifier } from './useRoomClassifier';
 export type {
   ModelState,

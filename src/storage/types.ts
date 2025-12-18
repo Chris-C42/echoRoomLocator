@@ -26,6 +26,17 @@ export interface SampleFeatures {
   ambientFeatures?: number[];   // Ambient audio features (~73 values)
   orientation?: [number, number, number];  // [alpha, beta, gamma] normalized
   raw?: number[];               // Legacy: flat array for backward compat
+
+  // Orientation-aware feature groups (for orientation-robust models)
+  orientationAwareFeatures?: {
+    // Late reverb features (orientation-INVARIANT) - 20 values
+    lateReverbFeatures?: number[];
+    // Early reflection features (orientation-SENSITIVE) - 48 values
+    earlyReflectionFeatures?: number[];
+    // Metadata
+    mixingTimeMs?: number;
+    lateReverbConfidence?: number;
+  };
 }
 
 export interface Sample {

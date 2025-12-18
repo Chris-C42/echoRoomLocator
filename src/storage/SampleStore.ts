@@ -5,6 +5,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from './database';
 import { Sample, SampleFeatures, SampleMetadata, STORES } from './types';
+import {
+  analyzeOrientationDiversity,
+  hasMinimumOrientationDiversity,
+  OrientationStats,
+} from '../utils';
 
 /**
  * Create a new sample for a room
@@ -161,45 +166,140 @@ export async function getTrainingData(): Promise<{
 }
 
 /**
- * Check if we have enough samples for training
- * Requires at least 2 rooms with minSamplesPerRoom samples each
+ * Orientation diversity options for training checks
  */
-export async function canTrain(minSamplesPerRoom = 5): Promise<{
+export interface OrientationDiversityOptions {
+  enforced: boolean;
+  minDiversityScore: number;
+  minCoverage: number;
+}
+
+/**
+ * Default orientation diversity options (B4)
+ */
+export const DEFAULT_ORIENTATION_DIVERSITY_OPTIONS: OrientationDiversityOptions = {
+  enforced: true,
+  minDiversityScore: 0.4,
+  minCoverage: 0.5,
+};
+
+/**
+ * Extended training readiness result with orientation info
+ */
+export interface TrainingReadinessResult {
   canTrain: boolean;
   roomCount: number;
   readyRooms: number;
   totalSamples: number;
   message: string;
-}> {
-  const counts = await getSampleCountsByRoom();
-  const roomCount = counts.size;
+  // B4: Orientation diversity enforcement
+  orientationStats?: Map<string, OrientationStats>;
+  roomsWithLowDiversity?: string[];
+  orientationEnforced?: boolean;
+}
 
+/**
+ * Check if we have enough samples for training
+ * Requires at least 2 rooms with minSamplesPerRoom samples each
+ * B4: Also checks orientation diversity if enforced
+ */
+export async function canTrain(
+  minSamplesPerRoom = 5,
+  orientationOptions?: OrientationDiversityOptions
+): Promise<TrainingReadinessResult> {
+  const db = await getDatabase();
+  const samples = await db.getAll(STORES.SAMPLES);
+
+  // Group samples by room
+  const samplesByRoom = new Map<string, Sample[]>();
+  for (const sample of samples) {
+    const roomSamples = samplesByRoom.get(sample.roomId) || [];
+    roomSamples.push(sample);
+    samplesByRoom.set(sample.roomId, roomSamples);
+  }
+
+  const roomCount = samplesByRoom.size;
   let readyRooms = 0;
   let totalSamples = 0;
 
-  for (const count of counts.values()) {
-    totalSamples += count;
-    if (count >= minSamplesPerRoom) {
+  for (const roomSamples of samplesByRoom.values()) {
+    totalSamples += roomSamples.length;
+    if (roomSamples.length >= minSamplesPerRoom) {
       readyRooms++;
     }
   }
 
-  const canTrainResult = readyRooms >= 2;
-
-  let message: string;
+  // Basic checks
   if (roomCount < 2) {
-    message = `Need at least 2 rooms (have ${roomCount})`;
-  } else if (readyRooms < 2) {
-    message = `Need at least 2 rooms with ${minSamplesPerRoom}+ samples (have ${readyRooms})`;
-  } else {
-    message = `Ready to train with ${readyRooms} rooms and ${totalSamples} samples`;
+    return {
+      canTrain: false,
+      roomCount,
+      readyRooms,
+      totalSamples,
+      message: `Need at least 2 rooms (have ${roomCount})`,
+    };
+  }
+
+  if (readyRooms < 2) {
+    return {
+      canTrain: false,
+      roomCount,
+      readyRooms,
+      totalSamples,
+      message: `Need at least 2 rooms with ${minSamplesPerRoom}+ samples (have ${readyRooms})`,
+    };
+  }
+
+  // B4: Check orientation diversity if enforced
+  const options = orientationOptions || DEFAULT_ORIENTATION_DIVERSITY_OPTIONS;
+  const orientationStats = new Map<string, OrientationStats>();
+  const roomsWithLowDiversity: string[] = [];
+
+  if (options.enforced) {
+    for (const [roomId, roomSamples] of samplesByRoom.entries()) {
+      // Only check rooms that have enough samples
+      if (roomSamples.length >= minSamplesPerRoom) {
+        const orientations = roomSamples.map((s) => s.features.orientation);
+        const stats = analyzeOrientationDiversity(orientations);
+        orientationStats.set(roomId, stats);
+
+        // Check if this room has sufficient orientation diversity
+        const hasSufficientDiversity = hasMinimumOrientationDiversity(
+          stats,
+          options.minDiversityScore,
+          options.minCoverage
+        );
+
+        if (!hasSufficientDiversity && stats.samplesWithOrientation > 0) {
+          roomsWithLowDiversity.push(roomId);
+        }
+      }
+    }
+  }
+
+  // If orientation diversity is enforced and rooms have low diversity, block training
+  if (options.enforced && roomsWithLowDiversity.length > 0) {
+    const roomWord = roomsWithLowDiversity.length === 1 ? 'room has' : 'rooms have';
+    return {
+      canTrain: false,
+      roomCount,
+      readyRooms,
+      totalSamples,
+      message: `${roomsWithLowDiversity.length} ${roomWord} low orientation diversity. Capture samples facing different directions.`,
+      orientationStats,
+      roomsWithLowDiversity,
+      orientationEnforced: true,
+    };
   }
 
   return {
-    canTrain: canTrainResult,
+    canTrain: true,
     roomCount,
     readyRooms,
     totalSamples,
-    message,
+    message: `Ready to train with ${readyRooms} rooms and ${totalSamples} samples`,
+    orientationStats,
+    roomsWithLowDiversity: [],
+    orientationEnforced: options.enforced,
   };
 }

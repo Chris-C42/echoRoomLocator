@@ -32,6 +32,19 @@ export interface TrainingConfig {
     enabled: boolean;
     noiseStd: number;          // Gaussian noise standard deviation
   };
+  // Feature weighting for orientation robustness (A4)
+  featureWeighting: {
+    enabled: boolean;
+    lateReverbWeight: number;      // Weight for late reverb features (indices 0-19)
+    earlyReflectionWeight: number; // Weight for early reflection features (indices 20+)
+    lateFeatureCount: number;      // Number of late reverb features (default 20)
+  };
+  // Orientation diversity enforcement (B4)
+  orientationDiversity: {
+    enforced: boolean;             // Whether to block training when diversity is low
+    minDiversityScore: number;     // Minimum diversity score (0-1, default 0.4)
+    minCoverage: number;           // Minimum coverage (0-1, default 0.5)
+  };
 }
 
 export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
@@ -46,6 +59,19 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   augmentation: {
     enabled: true,
     noiseStd: 0.05,
+  },
+  // A4: Feature weighting - emphasize late reverb (orientation-invariant)
+  featureWeighting: {
+    enabled: true,
+    lateReverbWeight: 2.0,        // 2x weight on late reverb features
+    earlyReflectionWeight: 0.5,   // 0.5x weight on early reflection features
+    lateFeatureCount: 20,         // First 20 features are late reverb
+  },
+  // B4: Orientation diversity enforcement
+  orientationDiversity: {
+    enforced: true,               // Block training when diversity is low
+    minDiversityScore: 0.4,       // Minimum entropy-based diversity
+    minCoverage: 0.5,             // Minimum orientation coverage
   },
 };
 

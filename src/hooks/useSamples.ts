@@ -20,6 +20,10 @@ import {
   canTrain,
   getTrainingData,
 } from '../storage';
+import {
+  analyzeOrientationDiversity,
+  OrientationStats,
+} from '../utils';
 
 export interface UseSamplesState {
   samples: Sample[];
@@ -35,6 +39,9 @@ export interface TrainingReadiness {
   readyRooms: number;
   totalSamples: number;
   message: string;
+  // B4: Orientation diversity info
+  roomsWithLowDiversity?: string[];
+  orientationEnforced?: boolean;
 }
 
 export interface UseSamplesReturn {
@@ -43,6 +50,7 @@ export interface UseSamplesReturn {
   removeSample: (id: string) => Promise<boolean>;
   removeSamplesForRoom: (roomId: string) => Promise<number>;
   getSamplesForRoom: (roomId: string) => Promise<Sample[]>;
+  getOrientationStats: (roomId: string) => Promise<OrientationStats>;
   checkTrainingReadiness: () => Promise<TrainingReadiness>;
   getTrainingData: () => Promise<{ features: number[][]; labels: string[]; roomIds: string[] }>;
   refreshSamples: () => Promise<void>;
@@ -198,7 +206,22 @@ export function useSamples(): UseSamplesReturn {
   }, []);
 
   /**
+   * Get orientation statistics for a room's samples
+   */
+  const getOrientationStatsFn = useCallback(async (roomId: string): Promise<OrientationStats> => {
+    try {
+      const samples = await getSamplesForRoom(roomId);
+      const orientations = samples.map((s) => s.features.orientation);
+      return analyzeOrientationDiversity(orientations);
+    } catch (error) {
+      console.error('Failed to get orientation stats:', error);
+      return analyzeOrientationDiversity([]);
+    }
+  }, []);
+
+  /**
    * Check training readiness
+   * B4: Now includes orientation diversity enforcement
    */
   const checkTrainingReadiness = useCallback(async (): Promise<TrainingReadiness> => {
     const result = await canTrain();
@@ -207,7 +230,15 @@ export function useSamples(): UseSamplesReturn {
       canTrain: result.canTrain,
       trainingMessage: result.message,
     }));
-    return result;
+    return {
+      canTrain: result.canTrain,
+      roomCount: result.roomCount,
+      readyRooms: result.readyRooms,
+      totalSamples: result.totalSamples,
+      message: result.message,
+      roomsWithLowDiversity: result.roomsWithLowDiversity,
+      orientationEnforced: result.orientationEnforced,
+    };
   }, []);
 
   /**
@@ -223,6 +254,7 @@ export function useSamples(): UseSamplesReturn {
     removeSample,
     removeSamplesForRoom: removeSamplesForRoomFn,
     getSamplesForRoom: getSamplesForRoomFn,
+    getOrientationStats: getOrientationStatsFn,
     checkTrainingReadiness,
     getTrainingData: getTrainingDataFn,
     refreshSamples,

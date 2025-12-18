@@ -16,6 +16,11 @@ export type {
   AudioEngineState,
   AudioEngineCallbacks,
   AudioContextState,
+  // Orientation-aware feature types
+  OrientationAwareFeatures,
+  LateReverbFeatures,
+  EarlyReflectionFeatures,
+  FeatureMetadata,
 } from './types';
 
 export {
@@ -25,6 +30,11 @@ export {
   CHIRP_FEATURE_LENGTH,
   AMBIENT_FEATURE_LENGTH,
   AMBIENT_FEATURE_WITH_ORIENTATION_LENGTH,
+  // Orientation-aware feature constants
+  MIXING_TIME_MS,
+  LATE_REVERB_FEATURE_LENGTH,
+  EARLY_REFLECTION_FEATURE_LENGTH,
+  EXTENDED_FEATURE_VECTOR_LENGTH,
 } from './types';
 
 // Chirp generation
@@ -64,6 +74,9 @@ export {
 export {
   extractFeatures,
   extractFeaturesFromCapture,
+  // Orientation-aware feature extraction
+  extractOrientationAwareFeatures,
+  convertToOrientationAwareFeatures,
 } from './FeatureExtractor';
 
 // DSP utilities (for advanced usage)

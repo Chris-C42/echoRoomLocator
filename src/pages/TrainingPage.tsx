@@ -1,13 +1,15 @@
 import { Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   useRooms,
   useAudioEngine,
   useSamples,
   useRoomClassifier,
   RoomWithSampleCount,
+  OrientationStats,
 } from '../hooks';
 import { ChirpMode } from '../audio';
+import OrientationCoverageIndicator from '../components/OrientationCoverageIndicator';
 
 type ViewState = 'list' | 'add-room' | 'capture' | 'training';
 type CaptureModeUI = 'chirp-audible' | 'chirp-ultrasonic' | 'ambient';
@@ -15,7 +17,7 @@ type CaptureModeUI = 'chirp-audible' | 'chirp-ultrasonic' | 'ambient';
 export default function TrainingPage() {
   const { state: roomsState, addRoom, removeRoom, refreshRooms } = useRooms();
   const { state: audioState, capture, captureAmbient, requestPermission, reset: resetAudio } = useAudioEngine();
-  const { state: samplesState, addSample, getTrainingData, refreshSamples } = useSamples();
+  const { state: samplesState, addSample, getTrainingData, refreshSamples, getOrientationStats } = useSamples();
   const { state: classifierState, train } = useRoomClassifier();
 
   const [viewState, setViewState] = useState<ViewState>('list');
@@ -24,6 +26,48 @@ export default function TrainingPage() {
   const [captureMode, setCaptureMode] = useState<CaptureModeUI>('chirp-audible');
   const [includeOrientation, setIncludeOrientation] = useState(true);
   const [captureCount, setCaptureCount] = useState(0);
+  const [orientationStats, setOrientationStats] = useState<OrientationStats | null>(null);
+  const [allRoomsOrientationWarnings, setAllRoomsOrientationWarnings] = useState<string[]>([]);
+
+  // Refresh orientation stats when room changes or capture happens
+  const refreshOrientationStats = useCallback(async () => {
+    if (selectedRoom) {
+      const stats = await getOrientationStats(selectedRoom.id);
+      setOrientationStats(stats);
+    }
+  }, [selectedRoom, getOrientationStats]);
+
+  // Check orientation diversity across all rooms when on list view
+  const checkAllRoomsOrientationDiversity = useCallback(async () => {
+    const warnings: string[] = [];
+    for (const room of roomsState.rooms) {
+      if (room.sampleCount > 0) {
+        const stats = await getOrientationStats(room.id);
+        if (stats.samplesWithOrientation > 0) {
+          if (stats.diversityScore < 0.4) {
+            warnings.push(`"${room.name}": Low orientation diversity (${Math.round(stats.diversityScore * 100)}%)`);
+          } else if (stats.overallCoverage < 0.5) {
+            warnings.push(`"${room.name}": Limited orientation coverage`);
+          }
+        }
+      }
+    }
+    setAllRoomsOrientationWarnings(warnings);
+  }, [roomsState.rooms, getOrientationStats]);
+
+  // Refresh stats when entering capture mode or after capture
+  useEffect(() => {
+    if (viewState === 'capture' && selectedRoom) {
+      refreshOrientationStats();
+    }
+  }, [viewState, selectedRoom, captureCount, refreshOrientationStats]);
+
+  // Check all rooms orientation when on list view
+  useEffect(() => {
+    if (viewState === 'list' && roomsState.rooms.length > 0) {
+      checkAllRoomsOrientationDiversity();
+    }
+  }, [viewState, roomsState.rooms, checkAllRoomsOrientationDiversity]);
 
   // Refresh rooms when samples change
   useEffect(() => {
@@ -227,15 +271,31 @@ export default function TrainingPage() {
         </header>
 
         <div className="max-w-md mx-auto">
-          {/* Capture Status */}
-          <div className="card text-center mb-6">
-            <div className="text-6xl font-bold text-primary-400 mb-2">
-              {selectedRoom.sampleCount + captureCount}
+          {/* Capture Status with Orientation Coverage */}
+          <div className="card mb-6">
+            <div className="flex items-center justify-between gap-4">
+              {/* Sample count */}
+              <div className="text-center flex-1">
+                <div className="text-5xl font-bold text-primary-400 mb-1">
+                  {selectedRoom.sampleCount + captureCount}
+                </div>
+                <p className="text-gray-400 text-sm">samples</p>
+                {captureCount > 0 && (
+                  <p className="text-xs text-accent-400">+{captureCount} this session</p>
+                )}
+              </div>
+
+              {/* Orientation coverage indicator */}
+              {includeOrientation && orientationStats && (
+                <div className="flex-shrink-0">
+                  <OrientationCoverageIndicator
+                    stats={orientationStats}
+                    size={100}
+                    showRecommendation={true}
+                  />
+                </div>
+              )}
             </div>
-            <p className="text-gray-400">samples captured</p>
-            {captureCount > 0 && (
-              <p className="text-sm text-accent-400 mt-1">+{captureCount} this session</p>
-            )}
           </div>
 
           {/* Capture Mode Selection */}
@@ -612,6 +672,32 @@ export default function TrainingPage() {
             <p className="text-sm text-gray-500 mb-4">
               {samplesState.trainingMessage}
             </p>
+
+            {/* Orientation Diversity Warning */}
+            {allRoomsOrientationWarnings.length > 0 && (
+              <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 mb-4">
+                <div className="flex items-start gap-2">
+                  <svg className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div className="text-sm">
+                    <p className="text-yellow-400 font-medium mb-1">Low orientation diversity</p>
+                    <ul className="text-yellow-300/80 text-xs space-y-1">
+                      {allRoomsOrientationWarnings.slice(0, 3).map((warning, i) => (
+                        <li key={i}>{warning}</li>
+                      ))}
+                      {allRoomsOrientationWarnings.length > 3 && (
+                        <li>...and {allRoomsOrientationWarnings.length - 3} more</li>
+                      )}
+                    </ul>
+                    <p className="text-yellow-300/60 text-xs mt-2">
+                      Try capturing samples while facing different directions for better accuracy.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <button
               onClick={handleTrain}
               className="btn-accent w-full"
@@ -635,6 +721,10 @@ export default function TrainingPage() {
             <li className="flex gap-2">
               <span className="text-accent-400">•</span>
               Capture samples from different positions in each room
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary-400">•</span>
+              Vary phone orientation (N/E/S/W) for better accuracy
             </li>
             <li className="flex gap-2">
               <span className="text-accent-400">•</span>

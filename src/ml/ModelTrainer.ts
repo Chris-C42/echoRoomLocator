@@ -49,6 +49,7 @@ export class ModelTrainer {
   /**
    * Prepare training data
    * - Normalizes features
+   * - Applies feature weighting (A4) for orientation robustness
    * - Converts labels to one-hot encoding
    * - Applies data augmentation if enabled
    */
@@ -74,8 +75,22 @@ export class ModelTrainer {
     const normalizer = new FeatureNormalizer();
     const normalizedFeatures = normalizer.fitTransform(features);
 
+    // Apply feature weighting (A4) for orientation robustness
+    let weightedFeatures = normalizedFeatures;
+    if (this.config.featureWeighting.enabled) {
+      this.reportProgress({
+        epoch: 0,
+        totalEpochs: this.config.epochs,
+        loss: 0,
+        accuracy: 0,
+        phase: 'preparing',
+        message: 'Applying feature weights...',
+      });
+      weightedFeatures = this.applyFeatureWeights(normalizedFeatures);
+    }
+
     // Apply data augmentation if enabled
-    let augmentedFeatures = normalizedFeatures;
+    let augmentedFeatures = weightedFeatures;
     let augmentedLabels = labels;
 
     if (this.config.augmentation.enabled) {
@@ -89,7 +104,7 @@ export class ModelTrainer {
       });
 
       const { features: augFeats, labels: augLabs } = this.augmentData(
-        normalizedFeatures,
+        weightedFeatures,
         labels
       );
       augmentedFeatures = augFeats;
@@ -111,6 +126,27 @@ export class ModelTrainer {
       trainX,
       trainY: trainY as tf.Tensor2D,
     };
+  }
+
+  /**
+   * Apply feature weighting (A4) for orientation robustness
+   * Late reverb features (orientation-invariant) get higher weight
+   * Early reflection features (orientation-sensitive) get lower weight
+   */
+  private applyFeatureWeights(features: number[][]): number[][] {
+    const { lateReverbWeight, earlyReflectionWeight, lateFeatureCount } =
+      this.config.featureWeighting;
+
+    return features.map((sample) => {
+      return sample.map((value, idx) => {
+        // First lateFeatureCount features are late reverb (orientation-invariant)
+        // Remaining features are early reflections (orientation-sensitive)
+        const weight = idx < lateFeatureCount
+          ? lateReverbWeight
+          : earlyReflectionWeight;
+        return value * weight;
+      });
+    });
   }
 
   /**

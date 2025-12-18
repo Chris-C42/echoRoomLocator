@@ -30,6 +30,12 @@ export {
   getTotalSampleCount,
   getTrainingData,
   canTrain,
+  DEFAULT_ORIENTATION_DIVERSITY_OPTIONS,
+} from './SampleStore';
+
+export type {
+  OrientationDiversityOptions,
+  TrainingReadinessResult,
 } from './SampleStore';
 
 // Model operations
