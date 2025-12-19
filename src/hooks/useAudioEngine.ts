@@ -38,8 +38,9 @@ import {
   getCurrentOrientation,
   isOrientationListening,
   getOrientationStatus,
-  normalizeOrientation,
+  normalizeOrientationQuaternion,
   DeviceOrientation,
+  Quaternion,
 } from '../audio/OrientationCapture';
 
 export type CaptureState = 'idle' | 'requesting' | 'capturing' | 'processing' | 'complete' | 'error';
@@ -63,7 +64,7 @@ export interface AudioEngineState {
 
 export interface CaptureResult {
   features: number[];
-  orientation?: [number, number, number];
+  orientation?: Quaternion;  // [w, x, y, z] unit quaternion
   mode: CaptureMode;
 }
 
@@ -372,7 +373,7 @@ export function useAudioEngine(): UseAudioEngineReturn {
   }, []);
 
   /**
-   * Get the last capture result with normalized orientation
+   * Get the last capture result with normalized orientation as quaternion
    * Useful for storage
    */
   const getCaptureResult = useCallback((): CaptureResult | null => {
@@ -380,7 +381,7 @@ export function useAudioEngine(): UseAudioEngineReturn {
     if (!mode) return null;
 
     let features: number[] | null = null;
-    let orientation: [number, number, number] | undefined;
+    let orientation: Quaternion | undefined;
 
     if (mode === 'chirp' && state.lastFeatures) {
       features = state.lastFeatures.raw;
@@ -389,7 +390,8 @@ export function useAudioEngine(): UseAudioEngineReturn {
     }
 
     if (state.lastOrientation) {
-      orientation = normalizeOrientation(state.lastOrientation);
+      // Convert Euler angles from device orientation to quaternion [w, x, y, z]
+      orientation = normalizeOrientationQuaternion(state.lastOrientation);
     }
 
     if (!features) return null;

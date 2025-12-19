@@ -5,10 +5,18 @@
  * - Chirp-based acoustic fingerprinting (original)
  * - Ambient audio fingerprinting (new)
  * - Device orientation (new)
+ *
+ * Version 3 changes orientation to quaternion format:
+ * - Quaternion [w, x, y, z] instead of Euler angles [alpha, beta, gamma]
+ * - Avoids gimbal lock at extreme pitch angles
  */
 
 // Capture modes for multi-modal classification
 export type CaptureMode = 'chirp' | 'ambient-manual' | 'ambient-continuous';
+
+// Orientation formats
+export type OrientationEuler = [number, number, number];  // Legacy: [alpha, beta, gamma] normalized
+export type OrientationQuaternion = [number, number, number, number];  // [w, x, y, z] unit quaternion
 
 export interface Room {
   id: string;
@@ -24,7 +32,15 @@ export interface SampleFeatures {
   mode: CaptureMode;
   chirpFeatures?: number[];     // Chirp-based features (~60 values)
   ambientFeatures?: number[];   // Ambient audio features (~73 values)
-  orientation?: [number, number, number];  // [alpha, beta, gamma] normalized
+
+  // Orientation: quaternion [w, x, y, z] (4 values) or legacy Euler (3 values)
+  // New samples use quaternion format; legacy samples may have Euler until migrated
+  orientation?: OrientationQuaternion | OrientationEuler;
+
+  // Legacy Euler orientation for backward compatibility (v2 samples)
+  // Will be converted to quaternion on read
+  orientationEuler?: OrientationEuler;
+
   raw?: number[];               // Legacy: flat array for backward compat
 
   // Orientation-aware feature groups (for orientation-robust models)
@@ -127,8 +143,9 @@ export interface TrainingProgress {
 
 // Database schema version for migrations
 // v1: Original chirp-only samples with flat feature array
-// v2: Multi-modal samples with structured features + orientation
-export const DB_VERSION = 2;
+// v2: Multi-modal samples with structured features + Euler orientation
+// v3: Quaternion orientation (4 values) instead of Euler (3 values)
+export const DB_VERSION = 3;
 export const DB_NAME = 'echoroom-db';
 
 // Store names

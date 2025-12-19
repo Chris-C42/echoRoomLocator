@@ -8,7 +8,7 @@ import {
   RoomWithSampleCount,
   OrientationStats,
 } from '../hooks';
-import { ChirpMode } from '../audio';
+import { ChirpMode, normalizeOrientationQuaternion } from '../audio';
 import OrientationSphere from '../components/OrientationSphere';
 
 type ViewState = 'list' | 'add-room' | 'capture' | 'training';
@@ -37,7 +37,7 @@ export default function TrainingPage() {
   const [captureCount, setCaptureCount] = useState(0);
   const [orientationStats, setOrientationStats] = useState<OrientationStats | null>(null);
   const [allRoomsOrientationWarnings, setAllRoomsOrientationWarnings] = useState<string[]>([]);
-  const [sampleOrientations, setSampleOrientations] = useState<Array<[number, number, number]>>([]);
+  const [sampleOrientations, setSampleOrientations] = useState<Array<number[]>>([]);
 
   // Refresh orientation stats when room changes or capture happens
   const refreshOrientationStats = useCallback(async () => {
@@ -48,12 +48,17 @@ export default function TrainingPage() {
   }, [selectedRoom, getOrientationStats]);
 
   // Load sample orientations for 3D sphere visualization
+  // Supports both quaternion (4 values) and legacy Euler (3 values) formats
   const loadSampleOrientations = useCallback(async () => {
     if (selectedRoom) {
       const samples = await getSamplesForRoom(selectedRoom.id);
-      const orientations = samples
-        .map(s => s.features.orientation)
-        .filter((o): o is [number, number, number] => o !== undefined);
+      const orientations: number[][] = [];
+      for (const sample of samples) {
+        const o = sample.features.orientation;
+        if (o !== undefined) {
+          orientations.push([...o]); // Convert tuple to array
+        }
+      }
       setSampleOrientations(orientations);
     } else {
       setSampleOrientations([]);
@@ -177,16 +182,12 @@ export default function TrainingPage() {
       console.log('[TrainingPage] Ambient capture result:', features ? 'success' : 'failed');
 
       if (features) {
-        // Get orientation from the capture (now captured at start of capture)
+        // Get orientation from the capture as quaternion [w, x, y, z]
         const orientation = audioState.lastOrientation
-          ? [
-              (audioState.lastOrientation.alpha ?? 0) / 360,
-              ((audioState.lastOrientation.beta ?? 0) + 180) / 360,
-              ((audioState.lastOrientation.gamma ?? 0) + 90) / 180,
-            ] as [number, number, number]
+          ? normalizeOrientationQuaternion(audioState.lastOrientation)
           : undefined;
 
-        console.log('[TrainingPage] Orientation captured:', orientation);
+        console.log('[TrainingPage] Orientation captured (quaternion):', orientation);
         console.log('[TrainingPage] Saving ambient sample...');
         await addSample(selectedRoom.id, {
           mode: 'ambient-manual',
@@ -215,16 +216,12 @@ export default function TrainingPage() {
       console.log('[TrainingPage] Capture result:', features ? 'success' : 'failed');
 
       if (features) {
-        // Get orientation from the capture (now captured at start of capture)
+        // Get orientation from the capture as quaternion [w, x, y, z]
         const orientation = audioState.lastOrientation
-          ? [
-              (audioState.lastOrientation.alpha ?? 0) / 360,
-              ((audioState.lastOrientation.beta ?? 0) + 180) / 360,
-              ((audioState.lastOrientation.gamma ?? 0) + 90) / 180,
-            ] as [number, number, number]
+          ? normalizeOrientationQuaternion(audioState.lastOrientation)
           : undefined;
 
-        console.log('[TrainingPage] Orientation captured:', orientation);
+        console.log('[TrainingPage] Orientation captured (quaternion):', orientation);
         console.log('[TrainingPage] Saving chirp sample...');
         await addSample(selectedRoom.id, {
           mode: 'chirp',

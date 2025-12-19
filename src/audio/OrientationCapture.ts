@@ -273,6 +273,7 @@ export function normalizeOrientation(orientation: DeviceOrientation): [number, n
  * Better handles the 0/360 wraparound for compass heading
  *
  * Returns [sin(alpha), cos(alpha), beta_normalized, gamma_normalized]
+ * @deprecated Use normalizeOrientationQuaternion instead for gimbal-lock-free representation
  */
 export function normalizeOrientationCircular(
   orientation: DeviceOrientation
@@ -289,6 +290,145 @@ export function normalizeOrientationCircular(
     beta / 180,            // -1 to 1
     gamma / 90             // -1 to 1
   ];
+}
+
+/**
+ * Quaternion representation [w, x, y, z]
+ * Unit quaternion for 3D rotation, no gimbal lock
+ */
+export type Quaternion = [number, number, number, number];
+
+/**
+ * Convert device orientation Euler angles to quaternion
+ *
+ * Device orientation uses ZXY intrinsic rotation order:
+ * - alpha (Z-axis): compass heading 0-360°
+ * - beta (X-axis): front-to-back tilt -180° to 180°
+ * - gamma (Y-axis): left-to-right tilt -90° to 90°
+ *
+ * The quaternion is computed as: q = q_z * q_x * q_y
+ * This matches the device orientation convention and avoids gimbal lock
+ *
+ * Returns [w, x, y, z] unit quaternion
+ */
+export function eulerToQuaternion(
+  alphaDeg: number,
+  betaDeg: number,
+  gammaDeg: number
+): Quaternion {
+  // Convert to radians and half-angles
+  const alpha = (alphaDeg * Math.PI) / 180;
+  const beta = (betaDeg * Math.PI) / 180;
+  const gamma = (gammaDeg * Math.PI) / 180;
+
+  const ha = alpha / 2; // half alpha (Z rotation)
+  const hb = beta / 2;  // half beta (X rotation)
+  const hg = gamma / 2; // half gamma (Y rotation)
+
+  const ca = Math.cos(ha);
+  const sa = Math.sin(ha);
+  const cb = Math.cos(hb);
+  const sb = Math.sin(hb);
+  const cg = Math.cos(hg);
+  const sg = Math.sin(hg);
+
+  // Quaternion multiplication for ZXY order: q = q_z * q_x * q_y
+  // q_z = (cos(α/2), 0, 0, sin(α/2))
+  // q_x = (cos(β/2), sin(β/2), 0, 0)
+  // q_y = (cos(γ/2), 0, sin(γ/2), 0)
+  //
+  // First: q_zx = q_z * q_x
+  // Then: q = q_zx * q_y
+  const w = ca * cb * cg - sa * sb * sg;
+  const x = ca * sb * cg - sa * cb * sg;
+  const y = ca * cb * sg + sa * sb * cg;
+  const z = sa * cb * cg + ca * sb * sg;
+
+  return [w, x, y, z];
+}
+
+/**
+ * Convert quaternion back to Euler angles (for debugging/display)
+ * Returns [alpha, beta, gamma] in degrees
+ */
+export function quaternionToEuler(q: Quaternion): [number, number, number] {
+  const [w, x, y, z] = q;
+
+  // Roll (gamma) - Y axis
+  const sinr_cosp = 2 * (w * y + z * x);
+  const cosr_cosp = 1 - 2 * (y * y + x * x);
+  const gamma = Math.atan2(sinr_cosp, cosr_cosp) * 180 / Math.PI;
+
+  // Pitch (beta) - X axis
+  const sinp = 2 * (w * x - z * y);
+  let beta: number;
+  if (Math.abs(sinp) >= 1) {
+    beta = Math.sign(sinp) * 90; // Use 90 degrees if out of range
+  } else {
+    beta = Math.asin(sinp) * 180 / Math.PI;
+  }
+
+  // Yaw (alpha) - Z axis
+  const siny_cosp = 2 * (w * z + x * y);
+  const cosy_cosp = 1 - 2 * (x * x + z * z);
+  let alpha = Math.atan2(siny_cosp, cosy_cosp) * 180 / Math.PI;
+  if (alpha < 0) alpha += 360; // Normalize to 0-360
+
+  return [alpha, beta, gamma];
+}
+
+/**
+ * Normalize orientation to quaternion format for ML and storage
+ * Returns [w, x, y, z] unit quaternion
+ *
+ * This is the preferred normalization as it:
+ * - Avoids gimbal lock at extreme pitch angles
+ * - Provides consistent representation for all orientations
+ * - Is more stable for interpolation and comparison
+ */
+export function normalizeOrientationQuaternion(
+  orientation: DeviceOrientation
+): Quaternion {
+  const alpha = orientation.alpha ?? 0;
+  const beta = orientation.beta ?? 0;
+  const gamma = orientation.gamma ?? 0;
+
+  return eulerToQuaternion(alpha, beta, gamma);
+}
+
+/**
+ * Rotate a 3D vector by a quaternion
+ * Used to compute where the phone's up-vector points in world space
+ */
+export function rotateVectorByQuaternion(
+  v: [number, number, number],
+  q: Quaternion
+): [number, number, number] {
+  const [w, qx, qy, qz] = q;
+  const [vx, vy, vz] = v;
+
+  // Quaternion rotation: v' = q * v * q^(-1)
+  // For unit quaternion: q^(-1) = [w, -x, -y, -z]
+  // Optimized formula:
+  const tx = 2 * (qy * vz - qz * vy);
+  const ty = 2 * (qz * vx - qx * vz);
+  const tz = 2 * (qx * vy - qy * vx);
+
+  return [
+    vx + w * tx + (qy * tz - qz * ty),
+    vy + w * ty + (qz * tx - qx * tz),
+    vz + w * tz + (qx * ty - qy * tx),
+  ];
+}
+
+/**
+ * Get the phone's up-vector in world coordinates from a quaternion
+ * This is the direction the phone's screen is facing
+ */
+export function getUpVectorFromQuaternion(q: Quaternion): [number, number, number] {
+  // Phone's local up-vector is (0, 1, 0)
+  // Rotate it by the orientation quaternion
+  return rotateVectorByQuaternion([0, 1, 0], q);
 }
 
 /**

@@ -114,7 +114,7 @@ export {
 } from './AmbientFeatureExtractor';
 
 // Orientation capture
-export type { DeviceOrientation } from './OrientationCapture';
+export type { DeviceOrientation, Quaternion } from './OrientationCapture';
 export {
   hasOrientationSupport,
   isSecureContext,
@@ -128,6 +128,11 @@ export {
   getOrientationPermissionState,
   normalizeOrientation,
   normalizeOrientationCircular,
+  normalizeOrientationQuaternion,
+  eulerToQuaternion,
+  quaternionToEuler,
+  rotateVectorByQuaternion,
+  getUpVectorFromQuaternion,
   hasValidOrientation,
   getOrientationStatus,
 } from './OrientationCapture';

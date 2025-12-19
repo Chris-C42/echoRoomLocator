@@ -7,6 +7,8 @@
  * Uses 8 octants based on the phone's up-vector:
  * - Upper hemisphere (phone tilted up): upperN, upperE, upperS, upperW
  * - Lower hemisphere (phone tilted down): lowerN, lowerE, lowerS, lowerW
+ *
+ * v3: Now uses quaternions [w, x, y, z] instead of Euler angles for gimbal-lock-free analysis
  */
 
 // 3D point type for up-vector calculations
@@ -15,6 +17,9 @@ interface Point3D {
   y: number;
   z: number;
 }
+
+// Quaternion type [w, x, y, z]
+type Quaternion = [number, number, number, number];
 
 // Octant names
 export type OctantName =
@@ -62,66 +67,87 @@ export interface OrientationStats {
   warnings: string[];
 }
 
-// Rotate point around X axis
-function rotateX(point: Point3D, angle: number): Point3D {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return {
-    x: point.x,
-    y: point.y * cos - point.z * sin,
-    z: point.y * sin + point.z * cos,
-  };
-}
+/**
+ * Rotate a 3D vector by a quaternion
+ * Uses the optimized quaternion rotation formula: v' = q * v * q^(-1)
+ */
+function rotateVectorByQuaternion(v: Point3D, q: Quaternion): Point3D {
+  const [w, qx, qy, qz] = q;
+  const { x: vx, y: vy, z: vz } = v;
 
-// Rotate point around Y axis
-function rotateY(point: Point3D, angle: number): Point3D {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return {
-    x: point.x * cos + point.z * sin,
-    y: point.y,
-    z: -point.x * sin + point.z * cos,
-  };
-}
+  // Optimized quaternion rotation
+  const tx = 2 * (qy * vz - qz * vy);
+  const ty = 2 * (qz * vx - qx * vz);
+  const tz = 2 * (qx * vy - qy * vx);
 
-// Rotate point around Z axis
-function rotateZ(point: Point3D, angle: number): Point3D {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
   return {
-    x: point.x * cos - point.y * sin,
-    y: point.x * sin + point.y * cos,
-    z: point.z,
+    x: vx + w * tx + (qy * tz - qz * ty),
+    y: vy + w * ty + (qz * tx - qx * tz),
+    z: vz + w * tz + (qx * ty - qy * tx),
   };
 }
 
 /**
- * Compute the phone's up-vector from normalized orientation values
- * Uses all three Euler angles (alpha, beta, gamma)
+ * Compute the phone's up-vector from a quaternion orientation
  *
- * @param normalized - [alpha/360, (beta+180)/360, (gamma+90)/180]
+ * @param quaternion - [w, x, y, z] unit quaternion
  * @returns The phone's up-vector in world coordinates
  */
-function computeUpVector(normalized: [number, number, number]): Point3D {
-  // Denormalize: stored as [alpha/360, (beta+180)/360, (gamma+90)/180]
-  const alphaDeg = normalized[0] * 360;
-  const betaDeg = normalized[1] * 360 - 180;
-  const gammaDeg = normalized[2] * 180 - 90;
+function computeUpVectorFromQuaternion(quaternion: Quaternion): Point3D {
+  // Phone's local up-vector is (0, 1, 0)
+  // Rotate it by the orientation quaternion
+  return rotateVectorByQuaternion({ x: 0, y: 1, z: 0 }, quaternion);
+}
 
-  // Convert to radians
+/**
+ * Compute the phone's up-vector from legacy Euler orientation (for backward compatibility)
+ * @deprecated Use computeUpVectorFromQuaternion instead
+ */
+function computeUpVectorFromEuler(euler: [number, number, number]): Point3D {
+  // Convert Euler to quaternion first
+  const alphaDeg = euler[0] * 360;
+  const betaDeg = euler[1] * 360 - 180;
+  const gammaDeg = euler[2] * 180 - 90;
+
   const alpha = (alphaDeg * Math.PI) / 180;
   const beta = (betaDeg * Math.PI) / 180;
   const gamma = (gammaDeg * Math.PI) / 180;
 
-  // Start with device's local up-vector (Y-axis)
-  let upVector: Point3D = { x: 0, y: 1, z: 0 };
+  const ha = alpha / 2;
+  const hb = beta / 2;
+  const hg = gamma / 2;
 
-  // Apply device orientation rotations (ZXY order: gamma/roll, beta/pitch, alpha/yaw)
-  upVector = rotateZ(upVector, gamma);
-  upVector = rotateX(upVector, beta);
-  upVector = rotateY(upVector, alpha);
+  const ca = Math.cos(ha);
+  const sa = Math.sin(ha);
+  const cb = Math.cos(hb);
+  const sb = Math.sin(hb);
+  const cg = Math.cos(hg);
+  const sg = Math.sin(hg);
 
-  return upVector;
+  const w = ca * cb * cg - sa * sb * sg;
+  const x = ca * sb * cg - sa * cb * sg;
+  const y = ca * cb * sg + sa * sb * cg;
+  const z = sa * cb * cg + ca * sb * sg;
+
+  return computeUpVectorFromQuaternion([w, x, y, z]);
+}
+
+/**
+ * Compute the phone's up-vector from orientation data
+ * Automatically detects quaternion (4 values) vs Euler (3 values) format
+ */
+function computeUpVector(orientation: number[]): Point3D {
+  if (orientation.length === 4) {
+    // Quaternion format [w, x, y, z]
+    return computeUpVectorFromQuaternion(orientation as Quaternion);
+  } else if (orientation.length === 3) {
+    // Legacy Euler format [alpha, beta, gamma] normalized
+    return computeUpVectorFromEuler(orientation as [number, number, number]);
+  } else {
+    // Invalid format, return neutral up-vector
+    console.warn('Invalid orientation format, expected 3 or 4 values, got:', orientation.length);
+    return { x: 0, y: 1, z: 0 };
+  }
 }
 
 /**
@@ -157,12 +183,13 @@ function getOctant(upVector: Point3D): OctantName {
 
 /**
  * Analyze orientation distribution across samples
+ * Accepts both quaternion (4 values) and legacy Euler (3 values) orientations
  */
 export function analyzeOrientationDiversity(
-  orientations: Array<[number, number, number] | undefined>
+  orientations: Array<number[] | undefined>
 ): OrientationStats {
   const validOrientations = orientations.filter(
-    (o): o is [number, number, number] => o !== undefined
+    (o): o is number[] => o !== undefined && (o.length === 3 || o.length === 4)
   );
 
   const totalSamples = orientations.length;

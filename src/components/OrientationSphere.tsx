@@ -21,8 +21,8 @@ interface OctantCoverage {
 interface Props {
   /** Current device orientation (real-time) */
   currentOrientation: DeviceOrientation | null;
-  /** Previous sample orientations (normalized: [alpha/360, beta_shifted, gamma_shifted]) */
-  sampleOrientations: Array<[number, number, number]>;
+  /** Previous sample orientations - quaternion [w,x,y,z] (4 values) or legacy Euler (3 values) */
+  sampleOrientations: Array<number[]>;
   /** Size of the canvas in pixels */
   size?: number;
   /** Whether to show the coordinate axes labels */
@@ -96,35 +96,61 @@ function orientationToRotation(orientation: DeviceOrientation | null): { alpha: 
 }
 
 /**
- * Convert normalized sample orientation to a point on the sphere surface
- * Uses the phone's up-vector (local Y-axis) transformed by all three Euler angles
- *
- * Device orientation Euler angles:
- * - alpha (yaw): rotation around world Z-axis (compass heading)
- * - beta (pitch): rotation around device X-axis (tilt forward/back)
- * - gamma (roll): rotation around device Y-axis (tilt left/right)
+ * Rotate a vector by a quaternion [w, x, y, z]
+ * Uses the optimized formula: v' = q * v * q^(-1)
+ */
+function rotateVectorByQuaternion(v: Point3D, q: [number, number, number, number]): Point3D {
+  const [w, qx, qy, qz] = q;
+  const { x: vx, y: vy, z: vz } = v;
+
+  // Optimized quaternion rotation
+  const tx = 2 * (qy * vz - qz * vy);
+  const ty = 2 * (qz * vx - qx * vz);
+  const tz = 2 * (qx * vy - qy * vx);
+
+  return {
+    x: vx + w * tx + (qy * tz - qz * ty),
+    y: vy + w * ty + (qz * tx - qx * tz),
+    z: vz + w * tz + (qx * ty - qy * tx),
+  };
+}
+
+/**
+ * Convert sample orientation to a point on the sphere surface
+ * Supports both quaternion (4 values) and legacy Euler (3 values) formats
  *
  * We compute where the phone's up-vector (0, 1, 0) points in world space
  */
-function sampleOrientationToPoint(normalized: [number, number, number], radius: number): Point3D {
-  // Denormalize: stored as [alpha/360, (beta+180)/360, (gamma+90)/180]
-  const alphaDeg = normalized[0] * 360;
-  const betaDeg = normalized[1] * 360 - 180;
-  const gammaDeg = normalized[2] * 180 - 90;
+function sampleOrientationToPoint(orientation: number[], radius: number): Point3D {
+  let upVector: Point3D;
 
-  // Convert to radians
-  const alpha = (alphaDeg * Math.PI) / 180;
-  const beta = (betaDeg * Math.PI) / 180;
-  const gamma = (gammaDeg * Math.PI) / 180;
+  if (orientation.length === 4) {
+    // Quaternion format [w, x, y, z] - use direct quaternion rotation
+    const q = orientation as [number, number, number, number];
+    upVector = rotateVectorByQuaternion({ x: 0, y: 1, z: 0 }, q);
+  } else if (orientation.length === 3) {
+    // Legacy Euler format: stored as [alpha/360, (beta+180)/360, (gamma+90)/180]
+    const alphaDeg = orientation[0] * 360;
+    const betaDeg = orientation[1] * 360 - 180;
+    const gammaDeg = orientation[2] * 180 - 90;
 
-  // Start with device's local up-vector (Y-axis)
-  let upVector: Point3D = { x: 0, y: 1, z: 0 };
+    // Convert to radians
+    const alpha = (alphaDeg * Math.PI) / 180;
+    const beta = (betaDeg * Math.PI) / 180;
+    const gamma = (gammaDeg * Math.PI) / 180;
 
-  // Apply device orientation rotations (same order as axes visualization)
-  // Order: Z (roll/gamma), X (pitch/beta), Y (yaw/alpha)
-  upVector = rotateZ(upVector, gamma);
-  upVector = rotateX(upVector, beta);
-  upVector = rotateY(upVector, alpha);
+    // Start with device's local up-vector (Y-axis)
+    upVector = { x: 0, y: 1, z: 0 };
+
+    // Apply device orientation rotations (same order as axes visualization)
+    // Order: Z (roll/gamma), X (pitch/beta), Y (yaw/alpha)
+    upVector = rotateZ(upVector, gamma);
+    upVector = rotateX(upVector, beta);
+    upVector = rotateY(upVector, alpha);
+  } else {
+    // Invalid format, return neutral position
+    upVector = { x: 0, y: 1, z: 0 };
+  }
 
   // Scale to sphere surface
   return {

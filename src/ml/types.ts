@@ -142,9 +142,9 @@ export type TrainingCompleteCallback = (result: TrainingResult) => void;
 export type EncoderType = 'chirp' | 'ambient';
 
 export interface MultiModalModelConfig {
-  // Feature sizes (including orientation)
-  chirpInputSize: number;      // Chirp features (60) + orientation (3) = 63
-  ambientInputSize: number;    // Ambient features (73) + orientation (3) = 76
+  // Feature sizes (including orientation as quaternion [w,x,y,z])
+  chirpInputSize: number;      // Chirp features (60) + orientation (4) = 64
+  ambientInputSize: number;    // Ambient features (73) + orientation (4) = 77
 
   // Encoder architectures
   chirpEncoderLayers: number[];   // e.g., [128, 64]
@@ -162,8 +162,8 @@ export interface MultiModalModelConfig {
 }
 
 export const DEFAULT_MULTIMODAL_CONFIG: Omit<MultiModalModelConfig, 'numClasses'> = {
-  chirpInputSize: 63,    // 60 chirp + 3 orientation
-  ambientInputSize: 76,  // 73 ambient + 3 orientation
+  chirpInputSize: 64,    // 60 chirp + 4 orientation (quaternion)
+  ambientInputSize: 77,  // 73 ambient + 4 orientation (quaternion)
   chirpEncoderLayers: [128, 64],
   ambientEncoderLayers: [128, 64],
   embeddingSize: 32,
